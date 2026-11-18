@@ -6,7 +6,7 @@ import { tDyn } from './i18n/he.js';
 export type { Category, ExtractedFields, ItemState, Reason, SecretKey, Settings };
 
 export interface Summary {
-  attention: number; awaitingVendor: number; waitingAi: number; worthALook: number; missedOpen: number;
+  attention: number; awaitingVendor: number; awaitingBackfillApproval: number; waitingAi: number; worthALook: number; missedOpen: number;
   ingestFailures: number; lastTickAt: string | null; lastTickError: string | null; lastAiSuccessAt: string | null;
 }
 

@@ -142,6 +142,8 @@ export const he = {
   'error.internal_error': 'שגיאה בשרת',
   'error.network': 'אין חיבור לשרת',
   'error.backfill_running': 'הייבוא הראשון כבר רץ',
+  'error.backfill_done': 'הייבוא הראשון כבר הסתיים',
+  'error.backfill_interrupted': 'הייבוא נקטע. צריך להפעיל אותו מחדש לפני הסיום.',
   'error.gmail_unavailable': 'Gmail לא ענה. בדקו את החיבור בהגדרות.',
   'error.generic': 'הפעולה נכשלה',
 
@@ -170,6 +172,8 @@ export const he = {
   'attention.waitingAiHint': 'ה-AI לא היה זמין. ננסה שוב בריצה הבאה.',
   'attention.worth': 'כדאי להציץ',
   'attention.worthHint': 'המתכון של הספק נכשל ונכתב מחדש ב-14 הימים האחרונים. כדאי לוודא שהפרטים נכונים.',
+  'attention.backfillLate': 'מהייבוא הראשון — ממתינים לאישור',
+  'attention.backfillLateHint': 'מיילים מתחילת השנה שנקראו רק אחרי סיום הייבוא. אשרו או דלגו ברשימת הייבוא.',
   'attention.missedLink': '{n} מיילים שנראים כמו חשבונית בלי התווית',
 
   // item detail
@@ -234,6 +238,7 @@ export const he = {
   'backfill.notApprovable': 'לא ניתן לאשר במצב הזה',
   'backfill.running': 'הייבוא רץ ברקע. הרשימה מתעדכנת לבד — אפשר כבר לאשר מה שמופיע.',
   'backfill.runError': 'הייבוא נעצר בשגיאה: {error}',
+  'backfill.interrupted': 'הייבוא נקטע באמצע (השרת הופעל מחדש). הפעילו אותו מחדש כדי להשלים.',
   'backfill.restart': 'הפעלה מחדש של הייבוא',
   'backfill.result': 'הייבוא הסתיים: {emails} מיילים, {items} מסמכים{failed}',
   'backfill.startedAt': 'התחיל ב-{when}',

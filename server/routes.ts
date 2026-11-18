@@ -4,7 +4,9 @@ import { z, ZodError } from 'zod';
 import { getAiProvider } from './ai/provider.js';
 import type { AiProvider } from './ai/provider.js';
 import { requireUser } from './auth.js';
-import { approveBackfill, backfillList, finishBackfill, skipBackfill, startBackfill } from './core/backfill.js';
+import {
+  approveBackfill, BACKFILL_INTERRUPTED, backfillList, finishBackfill, skipBackfill, startBackfill,
+} from './core/backfill.js';
 import { listIngestFailures } from './core/ingestFailures.js';
 import {
   getEmail, getItem, getItemPdf, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
@@ -323,13 +325,16 @@ export function apiRouter(ctx: ApiContext): express.Router {
   // Long (every email since 1 January): answers 202 at once and runs in the background; GET /backfill polls it.
   r.post('/backfill/start', wrap((_req, res) => {
     if (backfillJob) throw new HttpError(409, 'backfill_running');
+    if (getSettings().backfillDone) throw new HttpError(409, 'backfill_done');
     const { deps, gmail } = live();
     updateSettings({ backfillFinishedAt: null, backfillResult: null, backfillError: null });
     const done = (patch: Partial<Settings>) => updateSettings({ backfillFinishedAt: clock().toISOString(), ...patch });
     backfillJob = startBackfill(gmail, deps)
       .then((result) => { done({ backfillResult: result }); })
       .catch((e: unknown) => { done({ backfillError: sanitizeError(e instanceof Error ? e.message : String(e)) }); })
-      .finally(() => { backfillJob = null; });
+      .finally(() => { backfillJob = null; })
+      // Terminal: a throw while recording the outcome must never become an unhandled rejection.
+      .catch((e: unknown) => { console.error('backfill outcome not recorded:', e instanceof Error ? e.message : 'error'); });
     res.status(202).json({ started: true });
   }));
   r.post('/backfill/approve', wrap(async (req, res) => {
@@ -343,6 +348,8 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
   r.post('/backfill/finish', wrap((_req, res) => {
     if (backfillJob) throw new HttpError(409, 'backfill_running'); // items are still arriving
+    // A run cut short by a restart left emails unread: restart it before ending the first run.
+    if (getSettings().backfillError === BACKFILL_INTERRUPTED) throw new HttpError(409, 'backfill_interrupted');
     res.json({ dismissed: finishBackfill() });
   }));
 

@@ -58,7 +58,7 @@ export default function Backfill() {
 
   return (
     <div className="space-y-4">
-      <PageTitle actions={!done && <Button variant="secondary" disabled={act.busy || running} onClick={finish}>{t('backfill.finish')}</Button>}>
+      <PageTitle actions={!done && <Button variant="secondary" disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}>
         {t('backfill.title')}
       </PageTitle>
       {finished && <Notice tone="ok">{t('backfill.finished')}</Notice>}
@@ -72,7 +72,7 @@ export default function Backfill() {
       )}
       {!running && status?.error && !done && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <span>{t('backfill.runError', { error: status.error })}</span>
+          <span>{status.error === 'interrupted' ? t('backfill.interrupted') : t('backfill.runError', { error: status.error })}</span>
           <Button variant="secondary" disabled={act.busy} onClick={restart}>{t('backfill.restart')}</Button>
         </div>
       )}

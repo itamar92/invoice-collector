@@ -28,9 +28,14 @@ export function summary(now: Date) {
   const awaitingVendor = count('awaiting_vendor');
   const ingestFailures = listIngestFailures().length;
   const s = getSettings();
+  // After Finish, a backfill item can still reach the approval gate (a failed fetch retried later): it then
+  // needs the user, so it counts. Before Finish those items are the backfill list itself.
+  const awaitingBackfillApproval = s.backfillDone ? count('awaiting_backfill_approval') : 0;
   return {
-    attention: needsAttention + awaitingVendor + ingestFailures, // R21: open ingest failures need the user too
+    // R21: open ingest failures need the user too.
+    attention: needsAttention + awaitingVendor + ingestFailures + awaitingBackfillApproval,
     awaitingVendor,
+    awaitingBackfillApproval,
     waitingAi: count('waiting_ai'),
     worthALook: db.prepare('SELECT COUNT(*) FROM items WHERE recipe_failed = 1 AND updated_at >= ?').pluck()
       .get(worthSince(now)) as number,

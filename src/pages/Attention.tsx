@@ -75,20 +75,23 @@ export function ItemList({ items }: { items: Item[] }) {
 export default function Attention() {
   const { summary } = useApp();
   const data = useLoad(async () => {
-    const [needs, waitingAi, worth, failures] = await Promise.all([
+    const [needs, waitingAi, worth, failures, lateBackfill] = await Promise.all([
       api.items({ state: 'needs_attention', limit: 200 }), api.items({ state: 'waiting_ai', limit: 200 }),
       api.items({ worth: true, limit: 200 }), api.ingestFailures(),
+      // Only counted once the first run was finished; before that they are the backfill list itself.
+      summary?.awaitingBackfillApproval ? api.items({ state: 'awaiting_backfill_approval', limit: 200 }) : Promise.resolve({ items: [] as Item[] }),
     ]);
     const byReason = new Map<string, Item[]>();
     for (const i of needs.items) {
       const k = i.reason ?? 'internal_error';
       byReason.set(k, [...(byReason.get(k) ?? []), i]);
     }
-    return { byReason: [...byReason.entries()], waitingAi: waitingAi.items, worth: worth.items, failures };
-  }, [summary?.attention, summary?.waitingAi, summary?.worthALook]);
+    return { byReason: [...byReason.entries()], waitingAi: waitingAi.items, worth: worth.items, failures, lateBackfill: lateBackfill.items };
+  }, [summary?.attention, summary?.waitingAi, summary?.worthALook, summary?.awaitingBackfillApproval]);
 
   const d = data.data;
-  const empty = d && !d.byReason.length && !d.waitingAi.length && !d.worth.length && !d.failures.length && !summary?.awaitingVendor;
+  const empty = d && !d.byReason.length && !d.waitingAi.length && !d.worth.length && !d.failures.length && !d.lateBackfill.length
+    && !summary?.awaitingVendor;
 
   return (
     <div className="space-y-4">
@@ -110,6 +113,13 @@ export default function Attention() {
               </div>
             ))}
           </div>
+        </Card>
+      )}
+
+      {d && d.lateBackfill.length > 0 && (
+        <Card title={t('attention.backfillLate')} actions={<ButtonLink to="/backfill" variant="secondary">{t('nav.backfill')}</ButtonLink>}>
+          <p className="mb-2 text-sm text-slate-600">{t('attention.backfillLateHint')}</p>
+          <ItemList items={d.lateBackfill} />
         </Card>
       )}
 

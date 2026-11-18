@@ -115,6 +115,20 @@ export function finishBackfill(): number {
   return ids.length;
 }
 
+/** Settings value of backfillError for a run cut short by a restart (labelled in the UI). */
+export const BACKFILL_INTERRUPTED = 'interrupted';
+
+/**
+ * Boot-time check: a run that started but neither finished nor was ended by the user was cut short by a restart
+ * (the job lives only in memory). Marks it so the UI offers a restart instead of showing it as finished.
+ */
+export function markInterruptedBackfill(): boolean {
+  const s = getSettings();
+  if (!s.backfillStartedAt || s.backfillFinishedAt || s.backfillDone) return false;
+  updateSettings({ backfillError: BACKFILL_INTERRUPTED });
+  return true;
+}
+
 /** Re-ingests every recorded failure with its stored mode and runs the new items. Called by the worker. */
 export async function retryIngestFailures(gmail: GmailSource, deps: Deps): Promise<{ retried: number; succeeded: number }> {
   let retried = 0;

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { openDb } from './server/db.js';
 import { createApp } from './server/app.js';
+import { markInterruptedBackfill } from './server/core/backfill.js';
 import { serveSpa } from './server/spa.js';
 import { getAiProvider } from './server/ai/provider.js';
 import { DropboxStorage } from './server/destinations/dropbox.js';
@@ -17,6 +18,7 @@ if (!process.env.SECRET_KEY) throw new Error('SECRET_KEY is not set (see .env.ex
 const dataDir = path.resolve(process.env.DATA_DIR || './data');
 fs.mkdirSync(dataDir, { recursive: true });
 openDb(path.join(dataDir, 'app.db'));
+markInterruptedBackfill(); // a backfill job lives in memory: one that was running before this boot was cut short
 
 // Clients are cheap and hold only token caches; deps are rebuilt per tick so settings changes apply.
 const gmail = new GmailClient();

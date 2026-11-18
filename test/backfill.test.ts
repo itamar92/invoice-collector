@@ -7,7 +7,7 @@ import type { Recipe } from '../server/core/recipe.js';
 import type { AccountingDestination, Deps, StorageDestination } from '../server/core/types.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 import { getSettings, updateSettings } from '../server/settings.js';
-import { approveBackfill, backfillList, finishBackfill, skipBackfill, startBackfill } from '../server/core/backfill.js';
+import { approveBackfill, backfillList, finishBackfill, markInterruptedBackfill, skipBackfill, startBackfill } from '../server/core/backfill.js';
 import type { GmailMessage, GmailSource } from '../server/sources/gmail.js';
 
 const NOW = new Date('2026-06-15T09:00:00Z');
@@ -187,4 +187,17 @@ test('a failing fetch is recorded, the run continues, retry succeeds and clears;
   assert.equal(listIngestFailures().length, 0);
   assert.equal(listItems({ messageId: 'm1' }).length, 1);
   assert.equal(listItems({ state: 'awaiting_backfill_approval' }).length, 2);
+});
+
+test('boot after a run that never finished marks it interrupted; finished or never-started runs are left alone', () => {
+  updateSettings({ backfillStartedAt: '2026-06-15T08:00:00Z', backfillFinishedAt: null, backfillDone: false, backfillError: null });
+  assert.equal(markInterruptedBackfill(), true);
+  assert.equal(getSettings().backfillError, 'interrupted');
+  updateSettings({ backfillError: null, backfillFinishedAt: '2026-06-15T09:00:00Z' });
+  assert.equal(markInterruptedBackfill(), false);
+  assert.equal(getSettings().backfillError, null);
+  updateSettings({ backfillFinishedAt: null, backfillDone: true });
+  assert.equal(markInterruptedBackfill(), false);
+  updateSettings({ backfillStartedAt: null, backfillDone: false });
+  assert.equal(markInterruptedBackfill(), false);
 });

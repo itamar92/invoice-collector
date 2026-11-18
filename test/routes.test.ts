@@ -510,3 +510,62 @@ test('missed: list, queue (ingests, marks queued), hide', async () => {
   assert.equal((await post(c, '/api/missed/mh/hide')).status, 200);
   assert.equal(getDb().prepare("SELECT status FROM missed WHERE message_id = 'mh'").pluck().get(), 'hidden');
 });
+
+test('after backfill finished: start -> 409 backfill_done; late backfill items count in attention and stay approvable', async () => {
+  const g = { listCandidateMessages: async () => [] } as unknown as GmailSource;
+  const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+  updateSettings({ backfillDone: true });
+  const r = await post(c, '/api/backfill/start');
+  assert.equal(r.status, 409);
+  assert.deepEqual(await r.json(), { error: 'backfill_done' });
+  // A backfill email whose fetch failed is retried after Finish and lands in the approval gate.
+  createEmail({ messageId: 'late', threadId: 't', sender: 's', subject: 's', receivedAt: '2026-03-01T00:00:00Z', mode: 'backfill' });
+  const { id } = createItem('late', 'a.pdf', Buffer.from('%PDF-1 late'));
+  transition(id, 'awaiting_backfill_approval');
+  const sum = (await (await c.call('GET', '/api/summary')).json()) as any;
+  assert.equal(sum.awaitingBackfillApproval, 1);
+  assert.equal(sum.attention, 1);
+  const list = (await (await c.call('GET', '/api/backfill')).json()) as any;
+  assert.deepEqual(list.rows.map((x: any) => x.id), [id]);
+  assert.equal(((await (await post(c, '/api/backfill/skip', { ids: [id] })).json()) as any).skipped, 1);
+});
+
+test('before Finish, awaiting approval items are the backfill list, not attention', async () => {
+  const c = await boot();
+  createEmail({ messageId: 'bf1', threadId: 't', sender: 's', subject: 's', receivedAt: '2026-03-01T00:00:00Z', mode: 'backfill' });
+  transition(createItem('bf1', 'a.pdf', Buffer.from('%PDF-1 bf1')).id, 'awaiting_backfill_approval');
+  const sum = (await (await c.call('GET', '/api/summary')).json()) as any;
+  assert.equal(sum.attention, 0);
+  assert.equal(sum.awaitingBackfillApproval, 0);
+});
+
+test('an interrupted backfill cannot be finished until it is restarted (409 backfill_interrupted)', async () => {
+  const g = { listCandidateMessages: async () => [] } as unknown as GmailSource;
+  const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+  updateSettings({ backfillStartedAt: '2026-06-15T08:00:00Z', backfillError: 'interrupted' });
+  const r = await post(c, '/api/backfill/finish');
+  assert.equal(r.status, 409);
+  assert.deepEqual(await r.json(), { error: 'backfill_interrupted' });
+  assert.equal(getSettings().backfillDone, false);
+  assert.equal((await post(c, '/api/backfill/start')).status, 202);
+  await backfillJobDone();
+  assert.equal((await post(c, '/api/backfill/finish')).status, 200);
+});
+
+test('a throw while recording the backfill outcome never becomes an unhandled rejection', async () => {
+  const seen: unknown[] = [];
+  const onRej = (e: unknown) => { seen.push(e); };
+  process.on('unhandledRejection', onRej);
+  try {
+    const nasty = { toString() { throw new Error('cannot stringify'); } };
+    const g = { listCandidateMessages: async () => { throw nasty; } } as unknown as GmailSource;
+    const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+    assert.equal((await post(c, '/api/backfill/start')).status, 202);
+    await backfillJobDone();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(seen, []);
+    assert.equal(((await (await c.call('GET', '/api/backfill')).json()) as any).running, false);
+  } finally {
+    process.off('unhandledRejection', onRej);
+  }
+});
