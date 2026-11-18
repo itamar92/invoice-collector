@@ -17,6 +17,7 @@ import {
 import { AiOutputError, AiUnavailableError, type AiProvider, type AiRequest } from '../server/ai/provider.js';
 import { EXTRACT_SYSTEM, RECIPE_SYSTEM } from '../server/ai/prompts.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
+import { updateSettings } from '../server/settings.js';
 import { processItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
 
 // ---------- synthetic documents ----------
@@ -270,6 +271,25 @@ test('AI waits are not capped at 5 attempts; backoff caps at 360 minutes', async
   assert.equal(await processItem(id, deps({ ai })), 'waiting_ai');
   assert.equal(getItem(id)!.attempts, 12);
   assert.equal(getItem(id)!.nextAttemptAt, new Date(NOW.getTime() + 360 * 60_000).toISOString());
+});
+
+test('AI unavailable for this item only: after 4 waits while AI succeeded since the first wait → ai_failed', async () => {
+  const ai = fakeAi();
+  ai.unavailable = true;
+  const { id } = newItem(invoiceText());
+  for (let i = 1; i <= 3; i++) assert.equal(await processItem(id, deps({ ai })), 'waiting_ai');
+  // Another document was AI-extracted after this item started waiting.
+  updateSettings({ lastAiSuccessAt: new Date(Date.now() + 60_000).toISOString() });
+  assert.equal(await processItem(id, deps({ ai })), 'needs_attention');
+  assert.equal(getItem(id)!.reason, 'ai_failed');
+});
+
+test('AI down for everyone: waits stay uncapped even past 4 when no AI success since the first wait', async () => {
+  const ai = fakeAi();
+  ai.unavailable = true;
+  const { id } = newItem(invoiceText());
+  updateSettings({ lastAiSuccessAt: new Date(Date.now() - 86_400_000).toISOString() });
+  for (let i = 1; i <= 6; i++) assert.equal(await processItem(id, deps({ ai })), 'waiting_ai');
 });
 
 test('no AI + unknown vendor → needs_attention/no_recipe_no_ai', async () => {

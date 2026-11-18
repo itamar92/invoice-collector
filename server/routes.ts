@@ -94,7 +94,7 @@ const SettingsPatch = z.object({
   }).strict()),
   ai: z.object({
     mode: z.enum(['anthropic', 'openai', 'gemini', 'ssh', 'none']),
-    model: z.string().optional(),
+    model: z.string().trim().optional(),
     ssh: z.object({
       host: z.string().min(1), port: z.number().int().min(1).max(65535),
       user: z.string().min(1), hostKeySha256: z.string().min(1),

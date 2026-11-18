@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import {
-  AiOutputError, AiUnavailableError, aiExtract, aiWriteRecipe, getAiProvider, parseJsonReply,
+  AiOutputError, AiUnavailableError, DEFAULT_MODELS, aiExtract, aiWriteRecipe, getAiProvider, parseJsonReply,
   type AiProvider, type AiRequest,
 } from '../server/ai/provider.js';
 import { hostKeyMatches, runOverSsh, SshAgentProvider, type SshClientLike } from '../server/ai/sshAgent.js';
@@ -158,6 +158,11 @@ for (const [label, err, expectUnavailable, msg] of [
   ['403', { status: 403, message: 'no' }, true, /auth/],
   ['network', new Error('ECONNRESET'), true, /unavailable/],
   ['400', { status: 400, message: 'bad request' }, false, /rejected/],
+  ['fetch failed', new TypeError('fetch failed'), true, /unavailable/],
+  ['sdk connection error', Object.assign(new Error('Connection error.'), { name: 'APIConnectionError' }), true, /unavailable/],
+  ['timeout code', Object.assign(new Error('socket'), { code: 'ETIMEDOUT' }), true, /unavailable/],
+  ['cause code', Object.assign(new Error('request failed'), { cause: { code: 'ECONNREFUSED' } }), true, /unavailable/],
+  ['programming error', new TypeError("Cannot read properties of undefined (reading 'content')"), false, /ai request failed/],
 ] as const) {
   test(`error mapping ${label}`, async () => {
     const p = providers(err);
@@ -248,4 +253,11 @@ test('getAiProvider ssh: missing key -> unavailable provider', async () => {
   const p = getAiProvider({ ai: { mode: 'ssh', ssh: CFG } }, { getSecret: () => null })!;
   await assert.rejects(p.completeJson({ system: '', user: '' }), AiUnavailableError);
   assert.equal(p.supportsPdf, false);
+});
+
+test('empty model string falls back to the default model', async () => {
+  const create = async (p: any) => { seen.m = p.model; return { content: [{ type: 'text', text: '{}' }] }; };
+  const p = getAiProvider({ ai: { mode: 'anthropic', model: '' } }, { getSecret: key, anthropic: { messages: { create } } })!;
+  await p.completeJson({ system: '', user: '' });
+  assert.equal(seen.m, DEFAULT_MODELS.anthropic);
 });

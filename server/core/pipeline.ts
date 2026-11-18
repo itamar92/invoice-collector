@@ -1,4 +1,5 @@
 import { getDb } from '../db.js';
+import { getSettings } from '../settings.js';
 import { AiUnavailableError, aiExtract, aiWriteRecipe } from '../ai/provider.js';
 import { markReceiptFor, findReceiptForSentInvoice, sha256 } from './dedupe.js';
 import {
@@ -13,8 +14,10 @@ import { TransientError } from './types.js';
 import type { Deps, ExtractedFields, ItemState, Provenance, Reason } from './types.js';
 import { validateFields } from './validate.js';
 
-/** Storage/accounting transient failures allowed before the item goes to needs_attention. AI waits are uncapped. */
+/** Storage/accounting transient failures allowed before the item goes to needs_attention. */
 const MAX_ATTEMPTS = 5;
+/** AI waits are uncapped, except this many for one item while the AI succeeded for others since its first wait. */
+const MAX_AI_WAITS_WHILE_AI_WORKS = 4;
 const MAX_BACKOFF_MIN = 360;
 /** Highest `_N` suffix tried when a different file already holds the name. */
 const MAX_SUFFIX = 20;
@@ -312,8 +315,23 @@ function backoff(deps: Deps, attempts: number): string {
   return new Date(deps.now().getTime() + minutes * 60_000).toISOString();
 }
 
+/** When the AI went on working for other documents after this item started waiting. */
+function aiWorkedSinceFirstWait(id: string): boolean {
+  const last = getSettings().lastAiSuccessAt;
+  if (!last) return false;
+  const since = getDb().prepare(
+    `SELECT at FROM item_events WHERE item_id = ? AND to_state = 'waiting_ai'
+       AND (from_state IS NULL OR from_state != 'waiting_ai') ORDER BY id DESC LIMIT 1`).pluck().get(id) as string | undefined;
+  return since !== undefined && new Date(last).getTime() > new Date(since).getTime();
+}
+
 function waitForAi(item: Item, deps: Deps, msg: string): void {
   const attempts = item.attempts + 1;
+  // AI waits are uncapped while the AI is down for everyone; one document the AI keeps failing on
+  // (while it works for others) is handed to the user instead of waiting forever.
+  if (item.state === 'waiting_ai' && attempts >= MAX_AI_WAITS_WHILE_AI_WORKS && aiWorkedSinceFirstWait(item.id)) {
+    return moveTo(item.id, 'needs_attention', 'ai_failed', `${msg} (after ${attempts} waits; AI worked for other documents)`);
+  }
   getDb().transaction(() => {
     if (item.state !== 'waiting_ai') transition(item.id, 'waiting_ai', undefined, msg);
     updateItem(item.id, { attempts, nextAttemptAt: backoff(deps, attempts) });

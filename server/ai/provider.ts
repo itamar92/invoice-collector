@@ -35,17 +35,30 @@ export const DEFAULT_MODELS = {
   gemini: 'gemini-2.5-flash', // verify against provider docs at setup
 } as const;
 
+const NETWORK_ERROR = /ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE|UND_ERR|socket hang up|fetch failed|network|timed? ?out|connection error/i;
+
+/** True for connection/timeout failures (no HTTP response), judged by name, code, message or cause code. */
+function isNetworkError(e: unknown): boolean {
+  const err = e as { name?: unknown; code?: unknown; message?: unknown; cause?: { code?: unknown } } | null;
+  if (typeof err?.name === 'string' && /Connection|Timeout|Abort/.test(err.name)) return true;
+  return [err?.code, err?.message, err?.cause?.code, typeof e === 'string' ? e : undefined]
+    .some((v) => typeof v === 'string' && NETWORK_ERROR.test(v));
+}
+
 /**
- * Maps an SDK/HTTP failure. No HTTP status (connection error, timeout) -> unavailable;
- * 401/403 -> unavailable ("auth"); 408/409/429/5xx -> unavailable; any other 4xx means our request
- * was wrong -> plain Error (a bug that surfaces as needs_attention).
+ * Maps an SDK/HTTP failure. Network failure (connection, timeout, fetch failed) -> unavailable;
+ * 401/403 -> unavailable ("auth"); 408/409/429/5xx -> unavailable. Anything else (other 4xx: our request was
+ * wrong; no status and not network-like: a bug or an unexpected reply) -> plain Error, which the pipeline turns
+ * into needs_attention/ai_failed instead of waiting forever.
  */
 export function mapProviderError(e: unknown): Error {
   if (e instanceof AiUnavailableError || e instanceof AiOutputError) return e;
   const err = e as { status?: unknown; code?: unknown; message?: unknown } | null;
   const status = typeof err?.status === 'number' ? err.status : typeof err?.code === 'number' ? err.code : undefined;
   const msg = typeof err?.message === 'string' ? err.message : String(e);
-  if (status === undefined) return new AiUnavailableError(`ai unavailable: ${msg}`);
+  if (status === undefined) {
+    return isNetworkError(e) ? new AiUnavailableError(`ai unavailable: ${msg}`) : new Error(`ai request failed: ${msg}`);
+  }
   if (status === 401 || status === 403) return new AiUnavailableError(`ai auth failed (${status}): check the API key`);
   if (status === 408 || status === 409 || status === 429 || status >= 500) {
     return new AiUnavailableError(`ai unavailable (${status}): ${msg}`);
@@ -88,17 +101,17 @@ export function getAiProvider(s: Pick<Settings, 'ai'>, deps: AiDeps = {}): AiPro
     case 'anthropic': {
       const key = secret('ai_key_anthropic');
       if (!key) return new UnavailableProvider('anthropic', true, 'no api key');
-      return new AnthropicProvider(key, model ?? DEFAULT_MODELS.anthropic, deps.anthropic);
+      return new AnthropicProvider(key, model?.trim() || DEFAULT_MODELS.anthropic, deps.anthropic);
     }
     case 'openai': {
       const key = secret('ai_key_openai');
       if (!key) return new UnavailableProvider('openai', true, 'no api key');
-      return new OpenAiProvider(key, model ?? DEFAULT_MODELS.openai, deps.openai);
+      return new OpenAiProvider(key, model?.trim() || DEFAULT_MODELS.openai, deps.openai);
     }
     case 'gemini': {
       const key = secret('ai_key_gemini');
       if (!key) return new UnavailableProvider('gemini', true, 'no api key');
-      return new GeminiProvider(key, model ?? DEFAULT_MODELS.gemini, deps.gemini);
+      return new GeminiProvider(key, model?.trim() || DEFAULT_MODELS.gemini, deps.gemini);
     }
     case 'ssh': {
       const ssh = s.ai.ssh;
