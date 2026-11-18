@@ -203,7 +203,9 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
 
 /** ready → stored. Never uploads twice: a recorded path is reused, and same-content files are not re-sent. */
 async function store(item: Item, deps: Deps): Promise<void> {
-  const vendor = item.vendorKey ? getVendor(item.vendorKey) : null;
+  // Never file without a vendor decision (the edit that names the vendor routes it through the vendor step).
+  if (!item.vendorKey) return moveTo(item.id, 'needs_attention', 'missing_vendor', 'no vendor decision');
+  const vendor = getVendor(item.vendorKey);
   if (vendor?.status === 'unreviewed') return moveTo(item.id, 'awaiting_vendor', 'new_vendor');
   if (vendor?.status === 'ignored') return moveTo(item.id, 'ignored', undefined, 'vendor_ignored');
   if (item.storagePath) return moveTo(item.id, 'stored', undefined, 'storage_path_recorded');

@@ -6,12 +6,14 @@ import type { AiProvider } from './ai/provider.js';
 import { requireUser } from './auth.js';
 import { approveBackfill, backfillList, finishBackfill, skipBackfill, startBackfill } from './core/backfill.js';
 import { listIngestFailures } from './core/ingestFailures.js';
-import { getEmail, getItem, getItemPdf, listItems, setItemFields, transition, isTerminal, updateItem } from './core/items.js';
+import {
+  getEmail, getItem, getItemPdf, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
+} from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
-import { setVendorDecision } from './core/pipeline.js';
+import { setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { compileRecipe, RecipeError } from './core/recipe.js';
 import {
-  getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus,
+  getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
@@ -194,13 +196,30 @@ export function apiRouter(ctx: ApiContext): express.Router {
     };
     const fields: ExtractedFields = { ...empty, ...(item.fields ?? {}), ...patch };
     setItemFields(item.id, fields, 'manual');
+    // An item that never had a vendor (AI could not name one) gets it from the edit, and then needs the
+    // vendor decision like any new vendor: it must never be filed without one.
+    let vendorAssigned = false;
+    if (!item.vendorKey) {
+      const key = vendorKeyFor(fields);
+      if (key) {
+        if (!getVendor(key)) upsertVendor(key, (fields.vendorName ?? '').trim().slice(0, 100) || key);
+        setItemVendor(item.id, key);
+        vendorAssigned = true;
+      }
+    }
     const today = clock().toISOString().slice(0, 10);
     const check = validateFields(fields, getSettings(), today);
     let after = getItem(item.id)!;
+    const vendor = after.vendorKey ? getVendor(after.vendorKey) : null;
     // §4.5: a backfill item is filed only after approval, so a fixed one goes back to the approval list.
-    const fixedTo: ItemState = getEmail(item.messageId)?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready';
-    if (check.ok && after.state === 'needs_attention') {
-      transition(item.id, fixedTo, undefined, 'manual_edit');
+    const fixedTo: ItemState = vendor?.status === 'unreviewed' ? 'awaiting_vendor'
+      : vendor?.status === 'ignored' ? 'ignored'
+        : getEmail(item.messageId)?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready';
+    const reroute = after.state === 'needs_attention'
+      || (vendorAssigned && (after.state === 'ready' || after.state === 'awaiting_backfill_approval'));
+    if (check.ok && reroute && fixedTo !== after.state) {
+      transition(item.id, fixedTo, fixedTo === 'awaiting_vendor' ? 'new_vendor' : undefined,
+        fixedTo === 'ignored' ? 'vendor_ignored' : 'manual_edit');
       after = getItem(item.id)!;
     } else if (!check.ok && (after.state === 'ready' || after.state === 'awaiting_backfill_approval')) {
       transition(item.id, 'needs_attention', check.problems[0], `manual_edit_invalid:${check.problems.join(',')}`);

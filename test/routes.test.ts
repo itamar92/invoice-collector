@@ -10,7 +10,8 @@ import { resetLoginLimiter } from '../server/auth.js';
 import { createEmail, updateItem, createItem, getItem, setItemFields, setItemVendor, transition } from '../server/core/items.js';
 import { recordIngestFailure } from '../server/core/ingestFailures.js';
 import { compileRecipe } from '../server/core/recipe.js';
-import { saveRecipe, getVendor } from '../server/core/recipeStore.js';
+import { saveRecipe, getVendor, upsertVendor, setVendorStatus } from '../server/core/recipeStore.js';
+import { vendorKeyFor } from '../server/core/pipeline.js';
 import { setSecret } from '../server/secrets.js';
 import { getDb } from '../server/db.js';
 import { getSettings, updateSettings } from '../server/settings.js';
@@ -59,6 +60,14 @@ function item(state: 'needs_attention' | 'awaiting_vendor' = 'needs_attention', 
   if (fields) setItemFields(id, { ...FIELDS, ...fields }, 'ai');
   transition(id, state, state === 'needs_attention' ? 'missing_total' : undefined);
   return id;
+}
+
+/** The FIELDS vendor, already decided as business (so a fixed item goes on to filing). */
+function businessVendor() {
+  const key = vendorKeyFor(FIELDS)!;
+  upsertVendor(key, FIELDS.vendorName!);
+  setVendorStatus(key, 'business');
+  return key;
 }
 
 function recipeJson(over: Record<string, unknown> = {}) {
@@ -134,6 +143,7 @@ test('ai-always toggles the active recipe flag', async () => {
 });
 
 test('manual field edit on a needs_attention item re-validates and moves it to ready', async () => {
+  businessVendor();
   const id = item('needs_attention', { total: null, vat: null, net: null });
   const { call } = await boot();
   const res = await call('PUT', `/api/items/${id}/fields`, { total: 118, vat: 18, net: 100 });
@@ -142,6 +152,23 @@ test('manual field edit on a needs_attention item re-validates and moves it to r
   assert.equal(body.valid, true);
   assert.equal(body.item.state, 'ready');
   assert.equal(getItem(id)!.provenance, 'manual');
+});
+
+test('fixing an item that has no vendor yet routes it through the vendor decision, not straight to filing', async () => {
+  const id = item('needs_attention', { vendorName: null, total: null, vat: null, net: null }, 'nv');
+  assert.equal(getItem(id)!.vendorKey, null);
+  const { call } = await boot();
+  const body = (await (await call('PUT', `/api/items/${id}/fields`, { vendorName: 'ספק חדש לגמרי', total: 118, vat: 18, net: 100 })).json()) as any;
+  assert.equal(body.valid, true);
+  assert.equal(body.item.state, 'awaiting_vendor');
+  const key = vendorKeyFor({ ...FIELDS, vendorName: 'ספק חדש לגמרי' })!;
+  assert.equal(body.item.vendorKey, key);
+  assert.equal(getVendor(key)!.status, 'unreviewed');
+  // A ready item that never got a vendor: the edit that sets one also sends it to the vendor step.
+  const r = item('needs_attention', { vendorName: null }, 'nv2');
+  transition(r, 'ready');
+  const b2 = (await (await call('PUT', `/api/items/${r}/fields`, { vendorName: 'ספק נוסף' })).json()) as any;
+  assert.equal(b2.item.state, 'awaiting_vendor');
 });
 
 test('manual edit that is still invalid keeps the item in needs_attention and lists problems', async () => {
@@ -305,6 +332,7 @@ test('retry resets attempts and nextAttemptAt; storage_error -> ready, accountin
 });
 
 test('invalid edit of a ready item returns it to needs_attention; empty patch and unknown category -> 400', async () => {
+  businessVendor();
   const id = item('needs_attention', FIELDS, 'e1');
   transition(id, 'ready');
   const { call } = await boot();
@@ -440,6 +468,7 @@ test('backfill start failure is recorded sanitized; a new start clears it', asyn
 });
 
 test('valid manual edit of a backfill item waits for approval; invalid edit of an awaiting item -> needs_attention', async () => {
+  businessVendor();
   const id = item('needs_attention', { total: null, vat: null, net: null }, 'bfe');
   getDb().prepare(`UPDATE emails SET mode = 'backfill' WHERE message_id = 'm-bfe'`).run();
   const { call } = await boot();

@@ -621,6 +621,18 @@ test('dismissed while the accounting send is in flight → stays dismissed, ref 
   assert.ok(notes(id).some((n) => /sent:api_fields not applied.*dismissed/.test(n)));
 });
 
+test('ready item without a vendor is never filed → needs_attention/missing_vendor', async () => {
+  const storage = fakeStorage();
+  const { id } = newItem(invoiceText());
+  getDb().prepare(`UPDATE items SET fields_json = ?, state = 'ready' WHERE id = ?`).run(JSON.stringify({
+    vendorName: 'Demo Widgets Ltd', vendorTaxId: null, docType: 'tax_invoice', docNumber: '1001', issueDate: '2026-06-05',
+    total: 117, vat: null, net: null, currency: 'ILS', allocationNumber: null, description: 'x', category: 'תוכנות',
+  }), id);
+  assert.equal(await processItem(id, deps({ storage })), 'needs_attention');
+  assert.equal(getItem(id)!.reason, 'missing_vendor');
+  assert.equal(storage.puts, 0);
+});
+
 test('accounting fails 5 times → needs_attention/accounting_error', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const acc = fakeAccounting();
