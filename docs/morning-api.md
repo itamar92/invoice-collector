@@ -42,11 +42,17 @@ Never called: any endpoint with `approve` or `report` in its path; no draft-conf
 This only proves the drafts API is reachable on the account, not that upload works (unverifiable without writing).
 
 ## Retry safety (R16)
-Before `POST /expenses/file`, search drafts created in the last 7 days (`fromDate` = today-7d) and, when the item has a
-document number, return an existing draft whose `expense.number` equals it. Limits: the search item exposes no original
-filename, and `expense.number` is filled by Morning's own OCR, possibly after a delay, so a retry soon after a timeout may
-not find the first upload. Residual duplicate risk: a timeout after Morning stored the draft but before the response, retried
-before OCR filled the number, or an item with no document number, creates a second draft (the user sees and deletes it).
+Only a retry looks for an earlier upload: the pipeline passes `retry: true` when this item already had a send attempt
+(a transient failure counted in `attempts`, or an `accounting_send_attempt` event left by a crash mid-send). A first send
+never searches, because any draft it found would belong to another document (two vendors can share a number).
+On a retry, search drafts created in the last 7 days (`fromDate` = today-7d) and reuse a draft only when it is provably
+this document: `expense.number` equals our document number AND `expense.amount` equals our total AND the supplier
+matches (`expense.supplier.taxId` digits equal our vendor tax id, or the normalized `expense.supplier.name` equals our
+vendor name). Limits: these fields are filled by Morning's own OCR, possibly after a delay, and the supplier field
+names come from the community schema. Residual duplicate risk: a timeout after Morning stored the draft but before the
+response, retried before OCR filled number/amount/supplier (or with a supplier name that OCR spelled differently), or an
+item with no document number or total, creates a second draft (the user sees and deletes it). This is preferred over
+the opposite failure, silently skipping a different document that shares a number.
 Email mode: no way to check an inbox for earlier sends; a timeout in the mailer after Gmail accepted the message can
 send the same PDF twice.
 

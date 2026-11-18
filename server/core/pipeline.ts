@@ -269,9 +269,12 @@ async function account(item: Item, deps: Deps): Promise<void> {
 
   const pdf = getItemPdf(item.id);
   if (!pdf || !item.storagePath) return moveTo(item.id, 'needs_attention', 'accounting_error', 'no pdf or storage path');
+  // R16: a previous attempt (transient failure, or a crash mid-send) may have reached the destination.
+  const retry = item.attempts > 0 || hasSendAttempt(item.id);
+  noteItem(item.id, SEND_ATTEMPT);
   let res: { ref: string; mode: string };
   try {
-    res = await deps.accounting.send({ pdf, filename: basename(item.storagePath), fields, category });
+    res = await deps.accounting.send({ pdf, filename: basename(item.storagePath), fields, category, retry });
   } catch (e) {
     if (isDbError(e)) throw e;
     if (e instanceof TransientError) return retryLater(item, deps, 'accounting_error', e.message);
@@ -285,6 +288,12 @@ async function account(item: Item, deps: Deps): Promise<void> {
 }
 
 // ---------- helpers ----------
+
+const SEND_ATTEMPT = 'accounting_send_attempt';
+
+function hasSendAttempt(id: string): boolean {
+  return getDb().prepare('SELECT 1 FROM item_events WHERE item_id = ? AND note = ? LIMIT 1').get(id, SEND_ATTEMPT) !== undefined;
+}
 
 /** Transition that also clears the retry counters (every state change starts a fresh retry budget). */
 function moveTo(id: string, to: ItemState, reason?: Reason, note?: string): void {

@@ -576,6 +576,26 @@ test('AccountingRejected → needs_attention/accounting_error immediately with t
   assert.ok(getItem(id)!.storagePath);
 });
 
+test('accounting send says retry only after a previous send attempt for this item', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const accounting = fakeAccounting();
+  accounting.failTimes = 1;
+  const retries: (boolean | undefined)[] = [];
+  const send = accounting.send.bind(accounting);
+  accounting.send = async (i) => { retries.push(i.retry); return send(i); };
+  const { id } = newItem(invoiceText());
+  assert.equal(await processItem(id, deps({ accounting })), 'stored'); // transient failure, waits
+  assert.equal(await processItem(id, deps({ accounting })), 'done');
+  assert.deepEqual(retries, [false, true]);
+  // A crash after the send started (attempts still 0) also counts as a previous attempt.
+  const second = newItem(invoiceText({ num: '2002' }));
+  getDb().prepare(`INSERT INTO item_events (item_id, at, from_state, to_state, note)
+                   VALUES (?, '2026-01-01', 'stored', 'stored', 'accounting_send_attempt')`).run(second.id);
+  retries.length = 0;
+  await processItem(second.id, deps({ accounting }));
+  assert.deepEqual(retries, [true]);
+});
+
 test('accounting fails 5 times → needs_attention/accounting_error', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const acc = fakeAccounting();

@@ -88,7 +88,7 @@ export class MorningAccounting implements AccountingDestination {
     this.getSettings = opts.getSettings ?? defaultGetSettings;
   }
 
-  async send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category }):
+  async send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category; retry?: boolean }):
     Promise<{ ref: string; mode: 'api_fields' | 'api_file' | 'email' }> {
     const { mode, inboxEmail } = this.getSettings().morning;
     if (mode === 'email') return this.sendEmail(item, inboxEmail);
@@ -107,9 +107,10 @@ export class MorningAccounting implements AccountingDestination {
    * api_fields cannot be done safely (docs/morning-api.md): attaching fields would need an endpoint that is not
    * known to keep the draft unconfirmed. So both API modes upload the PDF as a draft and Morning reads it itself.
    */
-  private async sendFile(item: { pdf: Buffer; fields: ExtractedFields }) {
-    // R16: a retry after a timeout must not create a second draft.
-    const existing = await this.findRecentDraft(item.fields.docNumber);
+  private async sendFile(item: { pdf: Buffer; fields: ExtractedFields; retry?: boolean }) {
+    // R16: a retry after a timeout must not create a second draft. Only a retry looks: on a first send any
+    // matching draft belongs to another document.
+    const existing = item.retry ? await this.findRecentDraft(item.fields) : null;
     if (existing) return { ref: existing, mode: 'api_file' as const };
     const out = await this.client.post('/expenses/file', {
       file: 'data:application/pdf;base64,' + item.pdf.toString('base64'),
@@ -118,13 +119,28 @@ export class MorningAccounting implements AccountingDestination {
     return { ref: String(out.id), mode: 'api_file' as const };
   }
 
-  private async findRecentDraft(docNumber: string | null): Promise<string | null> {
-    if (!docNumber) return null;
+  /** A recent draft that is provably this document: same number, same amount and same supplier. */
+  private async findRecentDraft(f: ExtractedFields): Promise<string | null> {
+    if (!f.docNumber || f.total === null) return null;
     const from = new Date(this.now().getTime() - DRAFT_LOOKBACK_DAYS * 86_400_000);
     const out = await this.client.post('/expenses/drafts/search', { fromDate: ymd(from), page: 1, pageSize: 100 });
-    const hit = (out?.items ?? []).find((d: any) => d?.expense?.number === docNumber);
+    const hit = (out?.items ?? []).find((d: any) => isSameDocument(d?.expense, f));
     return hit?.id ? String(hit.id) : null;
   }
+}
+
+const digits = (s: unknown) => (typeof s === 'string' || typeof s === 'number' ? String(s).replace(/\D/g, '') : '');
+const normName = (s: unknown) =>
+  typeof s === 'string' ? s.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '') : '';
+
+function isSameDocument(e: any, f: ExtractedFields): boolean {
+  if (!e || String(e.number ?? '') !== f.docNumber) return false;
+  if (typeof e.amount !== 'number' || f.total === null || Math.abs(e.amount - f.total) > 0.005) return false;
+  const s = e.supplier ?? {};
+  const taxId = digits(s.taxId);
+  if (taxId !== '' && taxId === digits(f.vendorTaxId)) return true;
+  const name = normName(s.name);
+  return name !== '' && name === normName(f.vendorName);
 }
 
 /** api_fields is unconfirmed (docs/morning-api.md) so always false; api_file needs a working read-only drafts search. */

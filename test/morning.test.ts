@@ -50,15 +50,22 @@ beforeEach(() => {
   setSecret('morning_secret', 'sec1');
 });
 
-test('api_file: searches recent drafts then uploads the PDF as base64 data URI', async () => {
+test('api_file: first send uploads the PDF as base64 data URI without searching drafts', async () => {
   const f = fakeFetch(happy);
   const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
   const r = await m.send(item());
   assert.deepEqual(r, { ref: 'draft-1', mode: 'api_file' });
+  assert.deepEqual(f.calls.map(path), ['/api/v1/account/token', '/api/v1/expenses/file']);
+  assert.equal(body(f.calls[1]).file, 'data:application/pdf;base64,' + Buffer.from('%PDF-fake').toString('base64'));
+  assert.equal((f.calls[1].init.headers as Record<string, string>).Authorization, 'Bearer T');
+});
+
+test('api_file retry: searches drafts of the last 7 days before uploading', async () => {
+  const f = fakeFetch(happy);
+  const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m.send({ ...item(), retry: true }), { ref: 'draft-1', mode: 'api_file' });
   assert.deepEqual(f.calls.map(path), ['/api/v1/account/token', '/api/v1/expenses/drafts/search', '/api/v1/expenses/file']);
   assert.equal(body(f.calls[1]).fromDate, '2026-01-03');
-  assert.equal(body(f.calls[2]).file, 'data:application/pdf;base64,' + Buffer.from('%PDF-fake').toString('base64'));
-  assert.equal((f.calls[2].init.headers as Record<string, string>).Authorization, 'Bearer T');
 });
 
 test('api_fields setting falls back to file-only upload and reports api_file', async () => {
@@ -68,12 +75,38 @@ test('api_fields setting falls back to file-only upload and reports api_file', a
   assert.ok(f.calls.some((c) => path(c).endsWith('/expenses/file')));
 });
 
-test('retry safety: existing draft with same document number is returned, no upload', async () => {
-  const f = fakeFetch((c) => path(c).endsWith('/expenses/drafts/search')
-    ? json(200, { items: [{ id: 'old-9', expense: { number: 'INV-7' } }] }) : happy(c));
+const draft = (id: string, expense: Record<string, unknown>) => ({ id, expense });
+const drafts = (...items: unknown[]) => (c: Call) => path(c).endsWith('/expenses/drafts/search')
+  ? json(200, { items }) : happy(c);
+
+test('retry safety: a retried item finds its draft by number + amount + supplier, no second upload', async () => {
+  const f = fakeFetch(drafts(draft('old-9', { number: 'INV-7', amount: 118, supplier: { name: ' ACME ' } })));
   const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
-  assert.deepEqual(await m.send(item()), { ref: 'old-9', mode: 'api_file' });
+  assert.deepEqual(await m.send({ ...item(), retry: true }), { ref: 'old-9', mode: 'api_file' });
   assert.ok(!f.calls.some((c) => path(c).endsWith('/expenses/file')));
+  const byTaxId = fakeFetch(drafts(draft('old-8', { number: 'INV-7', amount: 118, supplier: { name: 'Other name', taxId: '51-234567-8' } })));
+  const m2 = new MorningAccounting({ fetchImpl: byTaxId.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m2.send({ ...item({ vendorTaxId: '512345678' }), retry: true }), { ref: 'old-8', mode: 'api_file' });
+});
+
+test('two vendors sharing a document number: both are sent (first send never looks up drafts)', async () => {
+  // Vendor A's INV-7 is already a draft in Morning; vendor B's INV-7 must still be uploaded.
+  const f = fakeFetch(drafts(draft('a-1', { number: 'INV-7', amount: 118, supplier: { name: 'Acme' } })));
+  const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m.send(item({ vendorName: 'Beta Co', total: 50 })), { ref: 'draft-1', mode: 'api_file' });
+  assert.ok(!f.calls.some((c) => path(c).endsWith('/drafts/search')));
+});
+
+test('retry safety: a draft matching only the number (other supplier or amount) is not ours → upload', async () => {
+  for (const exp of [
+    { number: 'INV-7', amount: 118, supplier: { name: 'Beta Co' } },
+    { number: 'INV-7', amount: 50, supplier: { name: 'Acme' } },
+    { number: 'INV-7', amount: 118 }, // supplier not filled yet: not provably ours
+  ]) {
+    const f = fakeFetch(drafts(draft('other', exp)));
+    const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
+    assert.deepEqual(await m.send({ ...item(), retry: true }), { ref: 'draft-1', mode: 'api_file' });
+  }
 });
 
 test('email mode sends via mailer with subject = filename without .pdf', async () => {

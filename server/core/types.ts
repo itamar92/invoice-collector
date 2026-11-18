@@ -50,7 +50,8 @@ export interface StorageDestination {
 
 /** Where business expenses are sent (Morning in v1, Task 12). */
 export interface AccountingDestination {
-  send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category }):
+  /** `retry`: this item already had a send attempt (it may have reached the destination), so check for it first. */
+  send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category; retry?: boolean }):
     Promise<{ ref: string; mode: 'api_fields' | 'api_file' | 'email' }>;
 }
 
