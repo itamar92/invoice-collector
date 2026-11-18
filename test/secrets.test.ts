@@ -38,3 +38,16 @@ test('missing SECRET_KEY throws', () => {
   assert.throws(() => encrypt('x'), /SECRET_KEY/);
   process.env.SECRET_KEY = k;
 });
+
+test('decrypt validates iv/tag lengths, rejects a truncated tag, a tampered tag and the wrong key', () => {
+  const a = encrypt('hello');
+  const [iv, tag, body] = a.split('.');
+  const b = (n: number) => Buffer.alloc(n, 1).toString('base64');
+  assert.throws(() => decrypt([b(8), tag, body].join('.')), /iv/);
+  assert.throws(() => decrypt([iv, b(4), body].join('.')), /tag/);
+  const t = Buffer.from(tag, 'base64'); t[0] ^= 1;
+  assert.throws(() => decrypt([iv, t.toString('base64'), body].join('.')));
+  const k = process.env.SECRET_KEY;
+  process.env.SECRET_KEY = 'a-different-key-for-unit-tests-0123456789';
+  try { assert.throws(() => decrypt(a)); } finally { process.env.SECRET_KEY = k; }
+});

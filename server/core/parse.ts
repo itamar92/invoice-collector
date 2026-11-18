@@ -71,7 +71,7 @@ export function parseDate(raw: string, format: DateFormat): string | null {
 export function parseDocType(raw: string): DocType | null {
   const text = normalize(raw).trim();
   if (/חשבונית\s*מס\s*[/\-&]?\s*קבלה|tax\s*invoice\s*[/\-&]?\s*receipt/i.test(text)) return 'tax_invoice_receipt';
-  if (/חשבונית\s*זיכוי|credit\s*note/i.test(text)) return 'credit_note';
+  if (/חשבונית\s*(מס\s*[/\-]?\s*)?זיכוי|credit\s*note/i.test(text)) return 'credit_note';
   if (/חשבונית\s*מס|tax\s*invoice/i.test(text)) return 'tax_invoice';
   if (/קבלה|receipt/i.test(text)) return 'receipt';
   return null;

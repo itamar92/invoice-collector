@@ -114,3 +114,10 @@ test('parseDocType ignores bidi marks and matches a non-breaking space', () => {
   assert.equal(parseDocType('חשבונית מס‎ / קבלה'), 'tax_invoice_receipt');
   assert.equal(parseDocType('חשבונית מס'), 'tax_invoice');
 });
+
+test('parseDocType: "חשבונית מס זיכוי" and "חשבונית מס/זיכוי" are credit notes, not tax invoices', () => {
+  assert.equal(parseDocType('חשבונית מס זיכוי'), 'credit_note');
+  assert.equal(parseDocType('חשבונית מס/זיכוי'), 'credit_note');
+  assert.equal(parseDocType('חשבונית מס - זיכוי'), 'credit_note');
+  assert.equal(parseDocType('חשבונית מס'), 'tax_invoice');
+});

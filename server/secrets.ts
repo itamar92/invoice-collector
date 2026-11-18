@@ -17,9 +17,12 @@ function key(): Buffer {
   return createHash('sha256').update(raw).digest();
 }
 
+const IV_LENGTH = 12;
+const TAG_LENGTH = 16;
+
 /** Format: base64(iv).base64(authTag).base64(body) */
 export function encrypt(plain: string): string {
-  const iv = randomBytes(12);
+  const iv = randomBytes(IV_LENGTH);
   const c = createCipheriv('aes-256-gcm', key(), iv);
   const body = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
   return [iv, c.getAuthTag(), body].map(b => b.toString('base64')).join('.');
@@ -29,7 +32,9 @@ export function decrypt(cipher: string): string {
   const parts = cipher.split('.');
   if (parts.length !== 3) throw new Error('Malformed ciphertext');
   const [iv, tag, body] = parts.map(p => Buffer.from(p, 'base64'));
-  const d = createDecipheriv('aes-256-gcm', key(), iv);
+  if (iv.length !== IV_LENGTH) throw new Error('Malformed ciphertext: bad iv length');
+  if (tag.length !== TAG_LENGTH) throw new Error('Malformed ciphertext: bad tag length');
+  const d = createDecipheriv('aes-256-gcm', key(), iv, { authTagLength: TAG_LENGTH });
   d.setAuthTag(tag);
   return Buffer.concat([d.update(body), d.final()]).toString('utf8');
 }
