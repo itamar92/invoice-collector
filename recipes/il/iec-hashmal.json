@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "iec-hashmal",
+  "displayName": "חברת החשמל",
+  "match": {
+    "senders": [
+      "noreplys@iec.co.il"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "חברת החשמל לישראל בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך עריכת החשבון\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(?:סה[\"״”“׳']?כ כולל מע[\"״”“׳']?מ לתקופת חשבון|הסכום לתשלום בש[\"״”“׳']?ח|סכום לתשלום)\\s*([\\d,.]+)",
+      "parse": "amount"
+    }
+  },
+  "description": "חשבון חשמל"
+}

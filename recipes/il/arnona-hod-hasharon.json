@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "arnona-hod-hasharon",
+  "displayName": "עיריית הוד השרון",
+  "match": {
+    "senders": [
+      "no_replay@orda.co.il"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "עיריית הוד השרון"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(?:לתשלום בש[\"״”“׳']ח|סה[\"״”“׳']כ)[^\\d\\n]*(\\d+(?:[,.]\\d+)*)",
+      "parse": "amount"
+    }
+  },
+  "description": "ארנונה"
+}

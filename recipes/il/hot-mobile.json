@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "hot-mobile",
+  "displayName": "הוט מובייל",
+  "match": {
+    "senders": [
+      "hotmobile@printernet.co.il"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "הוט מובייל בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך הפקת החשבון\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(?:סה[\"״”“׳']כ בחשבונית זו לתשלום כולל מע[\"״”“׳']מ|סה[\"״”“׳']כ לתשלום)[^\\d\\n]*([\\d,]+\\.?\\d*)",
+      "parse": "amount"
+    }
+  },
+  "description": "חשבון טלפון חודש {issueMonth-1}"
+}

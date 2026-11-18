@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "delek-ocr",
+  "displayName": "מנטה קמעונאות דרכים (דלק)",
+  "match": {
+    "textMarkers": [
+      "מנטה קמעונאות דרכים"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "מנטה קמעונאות דרכים בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך\\s+(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(\\d[\\d.,]*)[ \\t]*\\n[ \\t]*סה[\"״”“׳']?כ לתשלום",
+      "parse": "amount"
+    }
+  },
+  "description": "תדלוק"
+}

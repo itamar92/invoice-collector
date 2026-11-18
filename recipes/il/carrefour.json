@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "carrefour",
+  "displayName": "קרפור",
+  "match": {
+    "textMarkers": [
+      "קרפור"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "קרפור"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "סה[\"״”“׳']כ\\s+כולל\\s+מע[\"״”“׳']מ[^\\d\\n]*(\\d+(?:[,.]\\d+)*)",
+      "parse": "amount"
+    }
+  },
+  "description": "קניות"
+}

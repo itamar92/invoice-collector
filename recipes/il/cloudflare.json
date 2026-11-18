@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "cloudflare",
+  "displayName": "Cloudflare",
+  "match": {
+    "senders": [
+      "billing@cloudflare.com"
+    ]
+  },
+  "fields": {},
+  "aiAlways": true
+}

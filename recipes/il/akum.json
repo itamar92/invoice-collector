@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "akum",
+  "displayName": "אקו\"ם",
+  "match": {
+    "textMarkers": [
+      "אקו",
+      "תאריך אסמכתא"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "אקו\"ם בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך אסמכתא:\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "סה[\"״”“׳']כ לתשלום:\\s*₪?\\s*([\\d,]+(?:\\.\\d{2})?)",
+      "parse": "amount"
+    }
+  },
+  "description": "כרטיסים"
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "kvish6",
+  "displayName": "כביש 6",
+  "match": {
+    "textMarkers": [
+      "תקופת החשבונית",
+      "מספר נסיעות"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "כביש 6"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך הפקת החשבונית\\s+(\\d{2}/\\d{2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "סה[\"״”“׳']כ כולל מע[\"״”“׳']מ \\(ש[\"״”“׳']ח\\)\\s+(\\d+(?:[,.]\\d+)*)",
+      "parse": "amount"
+    }
+  },
+  "description": "נסיעות בכביש 6"
+}

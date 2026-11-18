@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "partner",
+  "displayName": "פרטנר",
+  "match": {
+    "senders": [
+      "thankyou@partner.net.il"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "פרטנר תקשורת בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "(\\d{2}/\\d{2}/\\d{2})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(\\d+(?:[,.]\\d+)*)\\s*\\{",
+      "parse": "amount"
+    }
+  },
+  "description": "חשבון אינטרנט חודש {issueMonth}"
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "heichal-hatarbut",
+  "displayName": "היכל התרבות",
+  "match": {
+    "textMarkers": [
+      "היכל התרבות"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "היכל התרבות בע\"מ"
+    },
+    "docType": {
+      "kind": "regex",
+      "pattern": "(חשבונית מס\\s*/?\\s*קבלה|חשבונית מס|קבלה)",
+      "parse": "docType"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך\\s+(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "סה[\"״”“׳']כ לתשלום\\s+([\\d,.]+)",
+      "parse": "amount"
+    }
+  },
+  "description": "שירותי אולם"
+}

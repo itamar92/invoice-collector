@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "invoice-collector-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "SECRET_KEY=demo-only-secret-key-not-for-real-use-0123",
+        "APP_PASSWORD=demo",
+        "PORT=3180",
+        "npm", "run", "demo"
+      ],
+      "port": 3180
+    },
+    {
+      "name": "invoice-collector-ui-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3180", "npm", "run", "dev:ui"],
+      "port": 5173
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "morning",
+  "displayName": "Morning",
+  "match": {
+    "senders": [
+      "notify@morning.co"
+    ]
+  },
+  "fields": {},
+  "aiAlways": true
+}

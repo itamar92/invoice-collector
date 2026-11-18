@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "10ten",
+  "displayName": "טן חברה לדלק",
+  "match": {
+    "senders": [
+      "no-reply@10ten.co.il"
+    ]
+  },
+  "fields": {},
+  "aiAlways": true
+}

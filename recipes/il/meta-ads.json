@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "meta-ads",
+  "displayName": "Meta Platforms",
+  "match": {
+    "textMarkers": [
+      "Meta Platforms"
+    ]
+  },
+  "fields": {},
+  "aiAlways": true
+}

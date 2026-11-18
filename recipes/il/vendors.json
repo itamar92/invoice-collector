@@ -1,0 +1,77 @@
+{
+  "hot-mobile": {
+    "displayName": "הוט מובייל",
+    "defaultCategory": "טלפון"
+  },
+  "partner": {
+    "displayName": "פרטנר",
+    "defaultCategory": "אינטרנט"
+  },
+  "iec-hashmal": {
+    "displayName": "חברת החשמל",
+    "defaultCategory": "חשבון חשמל"
+  },
+  "delek-ocr": {
+    "displayName": "מנטה קמעונאות דרכים (דלק)",
+    "defaultCategory": "דלק"
+  },
+  "arnona-hod-hasharon": {
+    "displayName": "עיריית הוד השרון",
+    "defaultCategory": "ארנונה"
+  },
+  "akum": {
+    "displayName": "אקו\"ם",
+    "defaultCategory": "קבלנות משנה"
+  },
+  "carrefour": {
+    "displayName": "קרפור",
+    "defaultCategory": "כיבודים ואוכל"
+  },
+  "heichal-hatarbut": {
+    "displayName": "היכל התרבות",
+    "defaultCategory": "קבלנות משנה"
+  },
+  "liveplay": {
+    "displayName": "לייב פליי",
+    "defaultCategory": "קבלנות משנה"
+  },
+  "tzmigei-shabtai": {
+    "displayName": "צמיגי שבתאי",
+    "defaultCategory": "תחזוקה רכב"
+  },
+  "bug-holland": {
+    "displayName": "באג הולנדיטסנטר",
+    "defaultCategory": "אחזקה ותיקונים"
+  },
+  "ginzburg-music": {
+    "displayName": "גינזבורג מוסיקה",
+    "defaultCategory": "אחזקה ותיקונים"
+  },
+  "kvish6": {
+    "displayName": "כביש 6"
+  },
+  "or-habarak": {
+    "displayName": "מוסך אור הברק",
+    "defaultCategory": "תחזוקה רכב"
+  },
+  "eni-mobile": {
+    "displayName": "אני מובייל",
+    "defaultCategory": "דלק"
+  },
+  "morning": {
+    "displayName": "Morning",
+    "defaultCategory": "קבלנות משנה"
+  },
+  "10ten": {
+    "displayName": "טן חברה לדלק",
+    "defaultCategory": "דלק"
+  },
+  "meta-ads": {
+    "displayName": "Meta Platforms",
+    "defaultCategory": "קידום ופרסום"
+  },
+  "cloudflare": {
+    "displayName": "Cloudflare",
+    "defaultCategory": "תוכנות"
+  }
+}

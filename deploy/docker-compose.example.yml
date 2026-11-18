@@ -1,0 +1,23 @@
+# Copy to the repo root as docker-compose.yml, create .env from .env.example, then: docker compose up -d
+services:
+  invoice-collector:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: invoice-collector:latest
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "3100"
+    volumes:
+      - invoice-data:/data
+    ports:
+      # NOTE: login needs HTTPS (Secure session cookie in production mode). Reach the app via an https://
+      # PUBLIC_URL (Cloudflare Tunnel); plain http only works on localhost, and not in Safari.
+      # Bound to localhost only; put a reverse proxy or a Cloudflare Tunnel in front.
+      # Recommended: Cloudflare Tunnel + Cloudflare Access (see docs/SETUP.md) instead of opening a port.
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+volumes:
+  invoice-data:

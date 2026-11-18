@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "tzmigei-shabtai",
+  "displayName": "צמיגי שבתאי",
+  "match": {
+    "textMarkers": [
+      "צמיגי שבתאי"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "צמיגי שבתאי ברק ואור"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "תאריך[:\\s]*(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "לתשלום[:\\s]*(\\d+(?:[,.]\\d+)*)",
+      "parse": "amount"
+    }
+  },
+  "description": "תיקון צמיגים"
+}

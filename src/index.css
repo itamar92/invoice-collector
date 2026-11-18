@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
+}
+
+html, body { background: var(--color-slate-50); color: var(--color-slate-900); }
+input, select, textarea { font: inherit; }
+/* Paths, filenames, JSON, emails stay left-to-right inside the RTL page. */
+.ltr { direction: ltr; unicode-bidi: isolate; text-align: left; }

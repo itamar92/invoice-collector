@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "eni-mobile",
+  "displayName": "אני מובייל",
+  "match": {
+    "textMarkers": [
+      "אני מובייל"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "אני מובייל בע\"מ"
+    },
+    "docType": {
+      "kind": "const",
+      "value": "tax_invoice_receipt"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "(\\d{2}/\\d{2}/\\d{2})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "(\\d+(?:[,.]\\d+)*)\\s*ש[\"״”“׳']ח",
+      "parse": "amount"
+    }
+  },
+  "description": "תדלוק"
+}

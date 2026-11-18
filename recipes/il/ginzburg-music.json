@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "vendorKey": "ginzburg-music",
+  "displayName": "גינזבורג מוסיקה",
+  "match": {
+    "textMarkers": [
+      "גינזבורג"
+    ]
+  },
+  "fields": {
+    "currency": {
+      "kind": "const",
+      "value": "ILS"
+    },
+    "vendorName": {
+      "kind": "const",
+      "value": "גינזבורג מוסיקה בע\"מ"
+    },
+    "docType": {
+      "kind": "regex",
+      "pattern": "(חשבונית מס\\s*/?\\s*קבלה|חשבונית מס|קבלה)",
+      "parse": "docType"
+    },
+    "issueDate": {
+      "kind": "regex",
+      "pattern": "(\\d{1,2}/\\d{1,2}/\\d{4})",
+      "parse": "date",
+      "dateFormat": "DD/MM/YYYY"
+    },
+    "total": {
+      "kind": "regex",
+      "pattern": "סה[\"״”“׳']כ\\s*כולל\\s*מע[\"״”“׳']מ\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+      "parse": "amount"
+    },
+    "description": {
+      "kind": "regex",
+      "pattern": "פרטים\\s*([^\\n]+)",
+      "parse": "text"
+    }
+  }
+}
