@@ -144,12 +144,15 @@ export function senderMatches(r: Recipe, sender: string): boolean {
   });
 }
 
+/** Hebrew gershayim/geresh and typographic quotes as ASCII, so a marker like אקו"ם matches every spelling. */
+const foldQuotes = (s: string) => s.replace(/[״”“″]/g, '"').replace(/[׳’‘′]/g, "'");
+
 export function matchesRecipe(r: Recipe, sender: string, text: string): boolean {
   const { senders, textMarkers } = r.match;
   if (senders && senders.length > 0 && !senderMatches(r, sender)) return false;
   if (textMarkers) {
-    const t = normalize(text);
-    if (!textMarkers.every((m) => t.includes(normalize(m)))) return false;
+    const t = foldQuotes(normalize(text));
+    if (!textMarkers.every((m) => t.includes(foldQuotes(normalize(m))))) return false;
   }
   return true;
 }

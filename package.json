@@ -15,7 +15,7 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "dev:ui": "vite",
     "seed:demo": "DATA_DIR=./data-demo tsx scripts/seed-demo.ts",
-    "demo": "vite build && DATA_DIR=./data-demo tsx scripts/seed-demo.ts && NODE_ENV=production DATA_DIR=./data-demo tsx server.ts"
+    "demo": "vite build && DATA_DIR=./data-demo tsx scripts/seed-demo.ts && NODE_ENV=production DEMO=1 DATA_DIR=./data-demo tsx server.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.10.0",

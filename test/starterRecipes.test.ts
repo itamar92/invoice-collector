@@ -59,3 +59,12 @@ test('no starter recipe sender is on a free-mail domain', () => {
   assert.ok(FREE_MAIL.test('someone@gmail.com'));
   assert.ok(!FREE_MAIL.test('no-reply@10ten.co.il'));
 });
+
+test('akum matches its own name in any quote style, not a word that merely starts with אקו', async () => {
+  const { compileRecipe: c, matchesRecipe: m } = await import('../server/core/recipe.js');
+  const r = c(JSON.parse(readFileSync(new URL('akum.json', dir), 'utf8')));
+  const line = 'תאריך אסמכתא: 10/01/2026';
+  assert.equal(m(r, 'x@example.com', `מוצרים אקולוגיים בע"מ\n${line}`), false);
+  assert.equal(m(r, 'x@example.com', `אקו"ם בע"מ\n${line}`), true);
+  assert.equal(m(r, 'x@example.com', `אקו״ם בע״מ\n${line}`), true);
+});

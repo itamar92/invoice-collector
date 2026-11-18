@@ -1,9 +1,8 @@
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDb } from './server/db.js';
 import { createApp } from './server/app.js';
-import { markInterruptedBackfill } from './server/core/backfill.js';
+import { envProblems, initDataStore } from './server/boot.js';
 import { serveSpa } from './server/spa.js';
 import { getAiProvider } from './server/ai/provider.js';
 import { DropboxStorage } from './server/destinations/dropbox.js';
@@ -13,12 +12,12 @@ import { getSettings } from './server/settings.js';
 import { GmailClient } from './server/sources/gmail.js';
 import { startWorker } from './server/worker.js';
 
-if (!process.env.SECRET_KEY) throw new Error('SECRET_KEY is not set (see .env.example)');
+const problems = envProblems(process.env);
+if (problems.length) throw new Error(`refusing to start: ${problems.join('; ')}`);
 
 const dataDir = path.resolve(process.env.DATA_DIR || './data');
 fs.mkdirSync(dataDir, { recursive: true });
-openDb(path.join(dataDir, 'app.db'));
-markInterruptedBackfill(); // a backfill job lives in memory: one that was running before this boot was cut short
+initDataStore(path.join(dataDir, 'app.db'));
 
 // Clients are cheap and hold only token caches; deps are rebuilt per tick so settings changes apply.
 const gmail = new GmailClient();
