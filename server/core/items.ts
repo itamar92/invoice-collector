@@ -118,6 +118,18 @@ export function transition(id: string, to: ItemState, reason?: Reason, note?: st
   })();
 }
 
+/** Transition only if the item is still in `from` (UPDATE ... WHERE state = ?). False when it moved meanwhile. */
+export function transitionIf(id: string, from: ItemState, to: ItemState, reason?: Reason, note?: string): boolean {
+  const db = getDb();
+  return db.transaction(() => {
+    const r = db.prepare('UPDATE items SET state = ?, reason = ?, updated_at = ? WHERE id = ? AND state = ?')
+      .run(to, reason ?? null, now(), id, from);
+    if (r.changes === 0) return false;
+    addEvent(id, from, to, note);
+    return true;
+  })();
+}
+
 function rowToItem(r: Record<string, unknown>): Item {
   return {
     id: r.id as string, messageId: r.message_id as string, attachmentName: r.attachment_name as string | null,

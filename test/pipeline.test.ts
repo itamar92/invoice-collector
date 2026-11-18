@@ -596,6 +596,31 @@ test('accounting send says retry only after a previous send attempt for this ite
   assert.deepEqual(retries, [true]);
 });
 
+test('dismissed while the upload is in flight → stays dismissed, path recorded, nothing sent', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const storage = fakeStorage();
+  const accounting = fakeAccounting();
+  const { id } = newItem(invoiceText());
+  const put = storage.put.bind(storage);
+  storage.put = async (...a) => { transition(id, 'dismissed', undefined, 'manual_dismiss'); return put(...a); };
+  assert.equal(await processItem(id, deps({ storage, accounting })), 'dismissed');
+  assert.equal(accounting.calls.length, 0);
+  assert.ok(getItem(id)!.storagePath);
+  assert.ok(notes(id).some((n) => /not applied.*dismissed/.test(n)));
+});
+
+test('dismissed while the accounting send is in flight → stays dismissed, ref recorded', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const accounting = fakeAccounting();
+  const { id } = newItem(invoiceText());
+  const send = accounting.send.bind(accounting);
+  accounting.send = async (i) => { transition(id, 'dismissed', undefined, 'manual_dismiss'); return send(i); };
+  assert.equal(await processItem(id, deps({ accounting })), 'dismissed');
+  assert.equal(accounting.calls.length, 1);
+  assert.equal(getItem(id)!.accountingRef, 'acc-1');
+  assert.ok(notes(id).some((n) => /sent:api_fields not applied.*dismissed/.test(n)));
+});
+
 test('accounting fails 5 times → needs_attention/accounting_error', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const acc = fakeAccounting();

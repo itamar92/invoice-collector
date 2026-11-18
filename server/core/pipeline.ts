@@ -3,7 +3,8 @@ import { getSettings } from '../settings.js';
 import { AiUnavailableError, aiExtract, aiWriteRecipe } from '../ai/provider.js';
 import { markReceiptFor, findReceiptForSentInvoice, sha256 } from './dedupe.js';
 import {
-  getEmail, getItem, getItemPdf, noteItem, setItemFields, setItemText, setItemVendor, transition, updateItem,
+  getEmail, getItem, getItemPdf, noteItem, setItemFields, setItemText, setItemVendor, transition, transitionIf,
+  updateItem,
   type Item,
 } from './items.js';
 import { buildFilename, buildFolder } from './naming.js';
@@ -236,8 +237,12 @@ async function store(item: Item, deps: Deps): Promise<void> {
     return moveTo(item.id, 'needs_attention', 'storage_error', message(e));
   }
   if (path === null) return moveTo(item.id, 'needs_attention', 'storage_error', `no free filename up to _${MAX_SUFFIX}`);
-  updateItem(item.id, { storagePath: path });
-  moveTo(item.id, 'stored', undefined, note);
+  const filed = path;
+  getDb().transaction(() => {
+    updateItem(item.id, { storagePath: filed });
+    // Dismissed (or otherwise moved) during the upload: the user's decision stands; the filing is recorded.
+    moveIf(item.id, 'ready', 'stored', note);
+  })();
 }
 
 /** stored → done. Sends to accounting only for a business vendor, a sendToAccounting category, a non-backfill
@@ -283,7 +288,7 @@ async function account(item: Item, deps: Deps): Promise<void> {
   }
   getDb().transaction(() => {
     updateItem(item.id, { accountingRef: res.ref, accountingMode: res.mode });
-    finishDone(item, `sent:${res.mode}`);
+    if (moveIf(item.id, 'stored', 'done', `sent:${res.mode}`) && item.recipeFailed) noteItem(item.id, 'recipe_rewritten');
   })();
 }
 
@@ -300,6 +305,21 @@ function moveTo(id: string, to: ItemState, reason?: Reason, note?: string): void
   getDb().transaction(() => {
     updateItem(id, { attempts: 0, nextAttemptAt: null });
     transition(id, to, reason, note);
+  })();
+}
+
+/**
+ * moveTo guarded on the state the step started from: if the item moved meanwhile (the user dismissed it during an
+ * upload or send), the new state stands and the step's outcome is only noted.
+ */
+function moveIf(id: string, from: ItemState, to: ItemState, note?: string): boolean {
+  return getDb().transaction(() => {
+    if (transitionIf(id, from, to, undefined, note)) {
+      updateItem(id, { attempts: 0, nextAttemptAt: null });
+      return true;
+    }
+    noteItem(id, `${note ?? to} not applied: item is ${currentState(id)}`);
+    return false;
   })();
 }
 
