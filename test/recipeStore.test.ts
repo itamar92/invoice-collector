@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb } from '../server/db.js';
+import { openDb, getDb } from '../server/db.js';
 import { compileRecipe, RecipeError, type Recipe } from '../server/core/recipe.js';
 import {
   findRecipe, saveRecipe, recipeHistory, getVendor, upsertVendor, setVendorStatus,
@@ -95,4 +95,20 @@ test('loadStarterRecipes is idempotent, sorted, applies sidecar categories, repo
   assert.equal(getVendor('vendor-a')?.status, 'unreviewed');
   writeFileSync(join(dir, 'c.json'), '{"schemaVersion":1}');
   assert.throws(() => loadStarterRecipes(dir), /c\.json/);
+});
+
+test('findRecipe skips (and logs without content) an active row that no longer compiles', (t) => {
+  openDb(':memory:');
+  saveRecipe(recipe(), 'starter');
+  getDb().prepare(`INSERT INTO recipes (vendor_key, version, json, source, created_at, active)
+                   VALUES ('broken-v', 1, ?, 'ai', '2026-01-01', 1)`)
+    .run(JSON.stringify({ ...recipe({ vendorKey: 'broken-v' }), fields: { total: { kind: 'regex', pattern: '(', parse: 'amount' } } }));
+  getDb().prepare(`INSERT INTO recipes (vendor_key, version, json, source, created_at, active)
+                   VALUES ('garbled-v', 1, 'not json SECRETISH', 'ai', '2026-01-01', 1)`).run();
+  const warn = t.mock.method(console, 'warn', () => {});
+  assert.equal(findRecipe('billing@demo-cell.co.il', '')?.vendorKey, 'demo-cell');
+  assert.equal(warn.mock.callCount(), 2);
+  const logged = warn.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
+  assert.match(logged, /broken-v/);
+  assert.doesNotMatch(logged, /SECRETISH|pattern/);
 });

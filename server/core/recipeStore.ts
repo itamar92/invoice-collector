@@ -53,12 +53,23 @@ export function listVendors(): Vendor[] {
   return rows.map(toVendor);
 }
 
-/** Active recipe for an email: a sender-pattern match beats a text-marker-only match; ties go to the newest. */
+/**
+ * Active recipe for an email: a sender-pattern match beats a text-marker-only match; ties go to the newest.
+ * A stored row that no longer compiles is skipped and logged by id/vendor only (never its content), so one bad
+ * recipe cannot stop every document from being matched.
+ */
 export function findRecipe(sender: string, text: string): Recipe | null {
-  const rows = getDb().prepare('SELECT json FROM recipes WHERE active = 1 ORDER BY id DESC').all() as { json: string }[];
+  const rows = getDb().prepare('SELECT id, vendor_key, json FROM recipes WHERE active = 1 ORDER BY id DESC')
+    .all() as { id: number; vendor_key: string; json: string }[];
   let markerOnly: Recipe | null = null;
   for (const row of rows) {
-    const r = compileRecipe(JSON.parse(row.json));
+    let r: Recipe;
+    try {
+      r = compileRecipe(JSON.parse(row.json));
+    } catch {
+      console.warn(`recipe ${row.id} (vendor ${row.vendor_key}) does not compile; skipped`);
+      continue;
+    }
     if (!matchesRecipe(r, sender, text)) continue;
     if (senderMatches(r, sender)) return r;
     markerOnly ??= r;
