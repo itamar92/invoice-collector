@@ -98,6 +98,12 @@ test('aiWriteRecipe: empty match (R12) and unsafe pattern are AiOutputError', as
   await assert.rejects(aiWriteRecipe(p, { text: TEXT, sender: 'x@y.co', fields: FIELDS }), AiOutputError);
 });
 
+test('aiWriteRecipe: a free-mail or wildcard sender is rejected and asked again', async () => {
+  const p = fake([{ ...goodRecipe, match: { senders: ['someone@gmail.com'] } }, { ...goodRecipe, match: { senders: ['*@demo.co'] } }]);
+  await assert.rejects(aiWriteRecipe(p, { text: TEXT, sender: 'someone@gmail.com', fields: FIELDS }), AiOutputError);
+  assert.match(p.calls[1].user, /free-mail|wildcard/);
+});
+
 test('parseJsonReply strips fences', () => {
   assert.deepEqual(parseJsonReply('```json\n{"a":1}\n```'), { a: 1 });
   assert.throws(() => parseJsonReply('sure! here you go'), AiOutputError);

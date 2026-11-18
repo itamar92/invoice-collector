@@ -133,6 +133,47 @@ export function compileRecipe(input: unknown): Recipe {
   return recipe;
 }
 
+/** Shared mailbox providers: an address there says nothing about which vendor sent the document. */
+const FREE_MAIL = /(^|[.@])(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|walla|icloud|me|aol|proton|protonmail|zoho|gmx|mail)\.[a-z.]+$/i;
+
+export function isFreeMailSender(sender: string): boolean {
+  return FREE_MAIL.test(sender.trim().toLowerCase());
+}
+
+/** Text every invoice carries: as a marker it would select any vendor's documents. */
+const GENERIC_MARKERS: ReadonlySet<string> = new Set([
+  'חשבונית', 'חשבונית מס', 'חשבונית מס קבלה', 'חשבונית מס/קבלה', 'חשבונית זיכוי', 'קבלה', 'מקור', 'העתק', 'נאמן למקור',
+  'תאריך', 'סה"כ', 'סה"כ לתשלום', 'לתשלום', 'מע"מ', 'בע"מ', 'עוסק מורשה', 'ח.פ.', 'ח"פ', 'מספר', 'סכום',
+  'invoice', 'tax invoice', 'receipt', 'total', 'date', 'amount', 'vat', 'ltd', 'bill', 'payment',
+]);
+const MIN_MARKER_LENGTH = 4;
+const markerKey = (m: string) => normalize(m).replace(/[״”“″]/g, '"').replace(/[׳’‘′]/g, "'")
+  .replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Why an AI-written match could select other vendors' documents (empty = safe): a wildcard or free-mail sender,
+ * or a generic or very short text marker. Entries the vendor's current recipe already has (`allowed`: proven,
+ * written by a person or shipped) are not re-judged.
+ */
+export function unsafeAiMatch(match: Recipe['match'], allowed?: Recipe['match']): string[] {
+  const okSenders = new Set((allowed?.senders ?? []).map((x) => x.toLowerCase()));
+  const okMarkers = new Set((allowed?.textMarkers ?? []).map(markerKey));
+  const problems: string[] = [];
+  for (const s of match.senders ?? []) {
+    if (okSenders.has(s.toLowerCase())) continue;
+    if (s.includes('*')) problems.push(`wildcard sender "${s}" is not allowed; use the exact address`);
+    else if (isFreeMailSender(s)) problems.push(`free-mail sender "${s}" does not identify a vendor; use text markers instead`);
+  }
+  for (const m of match.textMarkers ?? []) {
+    const k = markerKey(m);
+    if (okMarkers.has(k)) continue;
+    if (k.length < MIN_MARKER_LENGTH || GENERIC_MARKERS.has(k)) {
+      problems.push(`text marker "${m}" is too generic; use the vendor's own name or tax id`);
+    }
+  }
+  return problems;
+}
+
 /** True when the recipe has sender patterns and `sender` (a bare address) matches one of them. */
 export function senderMatches(r: Recipe, sender: string): boolean {
   const senders = r.match.senders;

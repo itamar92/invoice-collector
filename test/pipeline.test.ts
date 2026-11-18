@@ -457,6 +457,38 @@ test('recipe result fails validation → AI fallback, recipe rewritten (new vers
   assert.match(prompt, /Sum:/, 'previous recipe is passed to the rewrite');
 });
 
+test('recipe matched another vendor\'s document: AI names a different tax id → AI vendor, recipe not rewritten', async () => {
+  // Marker-only recipe of vendor A (tax id 511111111) whose total pattern does not fit vendor B's document.
+  saveRecipe(layoutRecipe('vendor-a', 'x', {
+    match: { textMarkers: ['Total:'] },
+    fields: {
+      ...layoutRecipe('vendor-a', 'x').fields,
+      vendorName: { kind: 'const', value: 'Vendor A Ltd' }, vendorTaxId: { kind: 'const', value: '511111111' },
+      total: { kind: 'regex', pattern: 'Sum: ([\\d.,]+)', parse: 'amount' },
+    },
+  }), 'starter');
+  setVendorStatus('vendor-a', 'business');
+  setVendorCategory('vendor-a', 'תוכנות');
+  const ai = fakeAi();
+  ai.overrideFields = { vendorName: 'Vendor B Ltd', vendorTaxId: '522222222' };
+  const acc = fakeAccounting();
+  const { id } = newItem(invoiceText({ vendor: 'Vendor B Ltd' }), { sender: 'b@vendor-b.example' });
+  assert.equal(await processItem(id, deps({ ai, accounting: acc })), 'awaiting_vendor');
+  assert.equal(getItem(id)!.vendorKey, 'tax-522222222');
+  assert.equal(recipeHistory('vendor-a').length, 1, 'vendor A recipe untouched');
+  assert.equal(acc.calls.length, 0);
+  // No tax id from the AI: the recipe's printed (const) name decides; a clearly different name → AI vendor.
+  ai.overrideFields = { vendorName: 'Gamma Supplies', vendorTaxId: null };
+  const g = newItem(invoiceText({ vendor: 'Gamma Supplies', num: '3003' }), { sender: 'c@gamma.example' });
+  assert.equal(await processItem(g.id, deps({ ai, accounting: acc })), 'awaiting_vendor');
+  assert.equal(getItem(g.id)!.vendorKey, 'gamma-supplies');
+  // Same vendor spelled with a suffix ("Vendor A Ltd" vs "Vendor A Ltd. (branch)") stays with the recipe.
+  ai.overrideFields = { vendorName: 'Vendor A Ltd. (branch)', vendorTaxId: null };
+  const a = newItem(invoiceText({ vendor: 'Vendor A Ltd', num: '4004' }), { sender: 'a@vendor-a.example' });
+  await processItem(a.id, deps({ ai, accounting: acc }));
+  assert.equal(getItem(a.id)!.vendorKey, 'vendor-a');
+});
+
 test('recipe fails validation and no AI → needs_attention/<problem>', async () => {
   knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
     fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.,]+)', parse: 'amount' } },

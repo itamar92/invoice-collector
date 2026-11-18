@@ -120,7 +120,7 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
 
   const sender = bareAddress(getEmail(item.messageId)?.sender ?? '');
   const today = localDate(deps);
-  const recipe = findRecipe(sender, doc.text);
+  let recipe = findRecipe(sender, doc.text);
 
   let vendorKey: string | null = null;
   let displayName = '';
@@ -164,6 +164,13 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
       return moveTo(item.id, 'needs_attention', 'ai_failed', message(e));
     }
     provenance = 'ai';
+    if (recipe && recipeVendorDiffers(recipe, fields)) {
+      // The recipe matched another vendor's document: the AI's vendor is the right one, and that recipe is
+      // neither credited with the document nor rewritten from it.
+      noteItem(item.id, `recipe_vendor_mismatch:${recipe.vendorKey}`);
+      recipe = null;
+      recipeFailed = false;
+    }
     if (!recipe) {
       vendorKey = vendorKeyFor(fields);
       displayName = (fields.vendorName ?? vendorKey ?? '').trim().slice(0, 100);
@@ -295,6 +302,29 @@ async function account(item: Item, deps: Deps): Promise<void> {
 }
 
 // ---------- helpers ----------
+
+const digitsOf = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '');
+const nameKey = (s: string | null | undefined) => (s ?? '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const constOf = (r: Recipe, f: 'vendorName' | 'vendorTaxId') => {
+  const rule = r.fields[f];
+  return rule?.kind === 'const' ? rule.value : null;
+};
+
+/**
+ * True when AI-extracted fields clearly name another vendor than the recipe's own identity: its key `tax-<id>`
+ * or constant tax id, else its constant (printed) vendor name; never what the recipe read from this document,
+ * and not the display name (a user-facing label that need not appear on the document). Tax ids decide when both
+ * sides have one; otherwise names that share nothing (neither contains the other).
+ */
+function recipeVendorDiffers(recipe: Recipe, ai: ExtractedFields): boolean {
+  const aiTax = digitsOf(ai.vendorTaxId);
+  const recipeTax = /^tax-(\d+)$/.exec(recipe.vendorKey)?.[1] ?? digitsOf(constOf(recipe, 'vendorTaxId'));
+  if (aiTax.length >= 5 && recipeTax.length >= 5) return aiTax !== recipeTax;
+  const aiName = nameKey(ai.vendorName);
+  const recipeName = nameKey(constOf(recipe, 'vendorName'));
+  if (!aiName || !recipeName) return false;
+  return !recipeName.includes(aiName) && !aiName.includes(recipeName);
+}
 
 const SEND_ATTEMPT = 'accounting_send_attempt';
 

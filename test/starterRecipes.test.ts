@@ -1,14 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { compileRecipe, matchesRecipe, runRecipe } from '../server/core/recipe.js';
+import { compileRecipe, isFreeMailSender, matchesRecipe, runRecipe } from '../server/core/recipe.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 
 const dir = new URL('../recipes/il/', import.meta.url);
 const files = readdirSync(dir).filter(f => f.endsWith('.json') && f !== 'vendors.json').sort();
 const sidecar = JSON.parse(readFileSync(new URL('vendors.json', dir), 'utf8')) as
   Record<string, { displayName: string; defaultCategory?: string }>;
-const FREE_MAIL = /(^|[.@])(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|walla|icloud|me|aol|proton|protonmail|zoho|gmx|mail)\.[a-z.]+$/i;
 // Exact totals for the synthetic fixtures (thousands separators and decimals on purpose).
 const EXPECTED_TOTAL: Record<string, number> = {
   'tzmigei-shabtai': 1150.5, 'bug-holland': 1349.9, carrefour: 1087.3, 'arnona-hod-hasharon': 1234.5,
@@ -54,10 +53,10 @@ test('vendors.json has no entries without a recipe', () => {
 test('no starter recipe sender is on a free-mail domain', () => {
   for (const file of files) {
     const r = compileRecipe(JSON.parse(readFileSync(new URL(file, dir), 'utf8')));
-    for (const sender of r.match.senders ?? []) assert.ok(!FREE_MAIL.test(sender), `${file}: free-mail sender ${sender}`);
+    for (const sender of r.match.senders ?? []) assert.ok(!isFreeMailSender(sender), `${file}: free-mail sender ${sender}`);
   }
-  assert.ok(FREE_MAIL.test('someone@gmail.com'));
-  assert.ok(!FREE_MAIL.test('no-reply@10ten.co.il'));
+  assert.ok(isFreeMailSender('someone@gmail.com'));
+  assert.ok(!isFreeMailSender('no-reply@10ten.co.il'));
 });
 
 test('akum matches its own name in any quote style, not a word that merely starts with אקו', async () => {

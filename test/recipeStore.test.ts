@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, getDb } from '../server/db.js';
-import { compileRecipe, RecipeError, type Recipe } from '../server/core/recipe.js';
+import { compileRecipe, isFreeMailSender, RecipeError, type Recipe } from '../server/core/recipe.js';
 import {
   findRecipe, saveRecipe, recipeHistory, getVendor, upsertVendor, setVendorStatus,
   setVendorCategory, listVendors, loadStarterRecipes,
@@ -111,4 +111,27 @@ test('findRecipe skips (and logs without content) an active row that no longer c
   const logged = warn.mock.calls.map((c) => c.arguments.join(' ')).join('\n');
   assert.match(logged, /broken-v/);
   assert.doesNotMatch(logged, /SECRETISH|pattern/);
+});
+
+test('AI recipes may not claim other vendors: wildcard / free-mail senders and generic or short markers are refused', () => {
+  openDb(':memory:');
+  const bad: Recipe['match'][] = [
+    { senders: ['*@demo-cell.co.il'] },
+    { senders: ['someone@gmail.com'] },
+    { senders: ['billing@demo-cell.co.il'], textMarkers: ['חשבונית מס'] },
+    { textMarkers: ['קבלה', 'סלולר דמו בע"מ'] },
+    { textMarkers: ['Invoice'] },
+    { textMarkers: ['אב'] },
+  ];
+  for (const match of bad) {
+    assert.throws(() => saveRecipe(recipe({ match }), 'ai'), RecipeError, JSON.stringify(match));
+  }
+  assert.equal(recipeHistory('demo-cell').length, 0);
+  // Specific ones are fine, and starter/user recipes keep their wildcard senders.
+  saveRecipe(recipe({ match: { senders: ['billing@demo-cell.co.il'], textMarkers: ['סלולר דמו בע"מ'] } }), 'ai');
+  saveRecipe(recipe({ match: { senders: ['*@demo-cell.co.il'] } }), 'user');
+  // A rewrite that keeps the vendor's existing (proven) match may carry its wildcard.
+  saveRecipe(recipe({ match: { senders: ['*@demo-cell.co.il'] }, description: 'ai rewrite' }), 'ai');
+  assert.equal(recipeHistory('demo-cell').length, 3);
+  assert.ok(isFreeMailSender('x@walla.co.il') && isFreeMailSender('x@gmail.com') && !isFreeMailSender('x@demo-cell.co.il'));
 });

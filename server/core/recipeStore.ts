@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDb } from '../db.js';
-import { compileRecipe, matchesRecipe, senderMatches, type Recipe } from './recipe.js';
+import { compileRecipe, matchesRecipe, RecipeError, senderMatches, unsafeAiMatch, type Recipe } from './recipe.js';
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
 export type RecipeSource = 'starter' | 'ai' | 'user';
@@ -87,6 +87,13 @@ export function getActiveRecipe(vendorKey: string): Recipe | null {
 /** Validates, deactivates the vendor's previous version and stores the new one. Returns the new row id. */
 export function saveRecipe(r: Recipe, source: RecipeSource): number {
   const recipe = compileRecipe(r);
+  if (source === 'ai') {
+    // An AI recipe must not be able to claim other vendors' documents (what the vendor already had stays allowed).
+    let current: Recipe | null = null;
+    try { current = getActiveRecipe(recipe.vendorKey); } catch { current = null; }
+    const problems = unsafeAiMatch(recipe.match, current?.match);
+    if (problems.length) throw new RecipeError(`unsafe match: ${problems.join('; ')}`);
+  }
   const db = getDb();
   return db.transaction(() => {
     upsertVendor(recipe.vendorKey, recipe.displayName);

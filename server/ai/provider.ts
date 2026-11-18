@@ -1,5 +1,5 @@
 import type { ZodType } from 'zod';
-import { compileRecipe, runRecipe, type Recipe } from '../core/recipe.js';
+import { compileRecipe, runRecipe, unsafeAiMatch, type Recipe } from '../core/recipe.js';
 import type { ExtractedFields } from '../core/types.js';
 import { getSecret, type SecretKey } from '../secrets.js';
 import type { Settings } from '../settings.js';
@@ -176,11 +176,15 @@ export async function aiWriteRecipe(
   input: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe },
 ): Promise<Recipe> {
   const validate = (raw: unknown): Recipe => {
+    let r: Recipe;
     try {
-      return compileRecipe(raw);
+      r = compileRecipe(raw);
     } catch (e) {
       throw new AiOutputError((e as Error).message);
     }
+    const unsafe = unsafeAiMatch(r.match, input.previous?.match);
+    if (unsafe.length) throw new AiOutputError(`unsafe match: ${unsafe.join('; ')}`);
+    return r;
   };
   let previous = input.previous;
   let last: Recipe | undefined;
