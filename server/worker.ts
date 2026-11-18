@@ -8,10 +8,9 @@ import { scanMissed } from './core/missed.js';
 import { processItem, setVendorDecision } from './core/pipeline.js';
 import type { VendorStatus } from './core/recipeStore.js';
 import type { Deps } from './core/types.js';
-import { gmailDate, ingestMessage, markHandledIfComplete } from './sources/gmail.js';
+import { ingestMessage, markHandledIfComplete } from './sources/gmail.js';
 import type { GmailSource } from './sources/gmail.js';
 
-const DAY_MS = 86_400_000;
 const MISSED_SCAN_HOUR = 6;
 
 export interface WorkerContext { deps: Deps; gmail: GmailSource }
@@ -60,12 +59,10 @@ export function startWorker(getDeps: () => WorkerContext, opts: WorkerOptions = 
       await step(async () => { await retryIngestFailures(gmail, deps); }); // R21: every tick
 
       await step(async () => {
-        const newest = getDb().prepare('SELECT MAX(received_at) FROM emails').pluck().get() as string | null;
-        let after = yearStart.replaceAll('-', '/');
-        if (newest) {
-          const t = new Date(new Date(newest).getTime() - 2 * DAY_MS);
-          if (!Number.isNaN(t.getTime()) && gmailDate(t) > after) after = gmailDate(t);
-        }
+        // The whole tax year, not a window after the newest email: a message labelled today may be months old.
+        // The query is bounded by date, excludes the done label, and is paged; known ids are skipped by
+        // ingestMessage without a fetch.
+        const after = yearStart.replaceAll('-', '/');
         const ids = await gmail.listCandidateMessages({ after, labelled: settings.gmailLabel != null });
         for (const id of ids) {
           try { await ingestMessage(gmail, id, 'ongoing'); } catch (e) { recordIngestFailure(id, 'ongoing', e); }

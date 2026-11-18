@@ -83,14 +83,25 @@ test('retries ingest failures every tick (R21) and ingests new ids; one bad id d
   assert.ok(getDb().prepare("SELECT 1 FROM emails WHERE message_id='good'").get());
 });
 
-test('ingest window: newest received_at minus 2 days, not before 1 Jan of the year', async () => {
+test('ingest window is the whole tax year (done-labelled excluded by the query): an old email labelled today is ingested', async () => {
   ready();
   createEmail({ messageId: 'm', threadId: 't', sender: 's', subject: 's', receivedAt: '2026-06-10T10:00:00Z', mode: 'ongoing' });
-  const { g, calls } = fakeGmail();
+  createItem('m', 'a.pdf', Buffer.from('%PDF-1 known'));
+  let fetched: string[] = [];
+  const { g, calls } = fakeGmail({
+    ids: ['m', 'old-labelled'],
+    async fetchMessage(id): Promise<GmailMessage> {
+      fetched.push(id);
+      return { id, threadId: 't', sender: 'a@b.example', subject: 's', receivedAt: '2026-02-01T08:00:00Z', pdfs: [], html: '', text: '' };
+    },
+  });
   const w = startWorker(() => ({ deps: deps(), gmail: g }), { intervalMs: 1e6, now: () => NOW });
   await w.tick();
   w.stop();
-  assert.equal(calls.list[0], '2026/06/08');
+  assert.equal(calls.list[0], '2026/01/01');
+  assert.deepEqual(fetched, ['old-labelled']); // a known id is skipped without fetching
+  assert.equal(getDb().prepare(`SELECT COUNT(*) FROM items WHERE message_id = 'old-labelled'`).pluck().get(), 1);
+  fetched = [];
 });
 
 test('due retries are processed, not-yet-due skipped; a throwing item does not stop the next', async () => {
