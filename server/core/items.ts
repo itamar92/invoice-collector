@@ -90,10 +90,10 @@ export function createItem(
   })();
 }
 
-export function createPlaceholderItem(messageId: string, reason: Reason): string {
+export function createPlaceholderItem(messageId: string, reason: Reason, attachmentName: string | null = null): string {
   const id = randomUUID();
   getDb().transaction(() => {
-    insertItem(id, messageId, null, null, null, 'needs_attention', reason);
+    insertItem(id, messageId, attachmentName, null, null, 'needs_attention', reason);
     addEvent(id, null, 'needs_attention', reason);
   })();
   return id;

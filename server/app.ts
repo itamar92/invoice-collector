@@ -17,6 +17,12 @@ function trustProxySetting(v: string | undefined): boolean | number | string {
 export function createApp(api?: ApiContext): express.Express {
   const app = express();
   app.set('trust proxy', trustProxySetting(process.env.TRUST_PROXY));
+  // Clickjacking: only our own pages may frame us (the item page frames its PDF route).
+  app.use((_req, res, next) => {
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    next();
+  });
   app.use(express.json());
   // Container health probe: before auth and the SPA fallback; deliberately exposes nothing but liveness.
   app.get('/healthz', (_req, res) => { res.json({ ok: true }); });

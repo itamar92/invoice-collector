@@ -198,6 +198,22 @@ test('bad bodies -> 400 with field messages; unknown ids -> 404; no stack traces
   assert.equal((await call('GET', '/api/items?limit=0')).status, 400);
 });
 
+test('PDF route is served inert: nosniff, sandbox CSP framable only by us, inline generic filename', async () => {
+  const id = item();
+  const { base, call } = await boot();
+  const pdf = await call('GET', `/api/items/${id}/pdf`);
+  assert.equal(pdf.status, 200);
+  assert.equal(pdf.headers.get('x-content-type-options'), 'nosniff');
+  const csp = pdf.headers.get('content-security-policy') ?? '';
+  assert.match(csp, /(^|;\s*)sandbox(;|$)/);
+  assert.match(csp, /frame-ancestors 'self'/);
+  assert.equal(pdf.headers.get('content-disposition'), 'inline; filename="document.pdf"');
+  // Every response refuses third-party framing; our own UI may still frame the PDF route.
+  const h = await fetch(`${base}/healthz`);
+  assert.equal(h.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.match(h.headers.get('content-security-policy') ?? '', /frame-ancestors 'self'/);
+});
+
 test('items list omits text; detail has events; pdf served as application/pdf; retry and dismiss', async () => {
   const id = item();
   const { call } = await boot();
@@ -484,7 +500,7 @@ test('missed: list, queue (ingests, marks queued), hide', async () => {
   const ins = getDb().prepare(`INSERT INTO missed (message_id, sender, subject, received_at, found_at, status) VALUES (?, 's@x.com', 's', '2026-06-01T00:00:00Z', '2026-06-02T00:00:00Z', 'open')`);
   ins.run('mq'); ins.run('mh');
   const g = {
-    fetchMessage: async (id: string) => ({ id, threadId: 't', sender: 's@x.com', subject: 's', receivedAt: '2026-06-01T00:00:00Z', pdfs: [{ name: 'a.pdf', data: Buffer.from('%PDF missed') }], html: '', text: '' }),
+    fetchMessage: async (id: string) => ({ id, threadId: 't', sender: 's@x.com', subject: 's', receivedAt: '2026-06-01T00:00:00Z', pdfs: [{ name: 'a.pdf', data: Buffer.from('%PDF-1 missed') }], html: '', text: '' }),
     markHandled: async () => {},
   } as unknown as GmailSource;
   const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });

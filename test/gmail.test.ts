@@ -2,7 +2,7 @@ import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { openDb } from '../server/db.js';
+import { openDb, getDb } from '../server/db.js';
 import { createApp } from '../server/app.js';
 import { setSecret, getSecret } from '../server/secrets.js';
 import { getSettings, updateSettings } from '../server/settings.js';
@@ -56,6 +56,23 @@ test('two PDFs make two items', async () => {
   assert.equal(getEmail('m1')?.sender, 'a@b.test');
 });
 
+test('an attachment named .pdf that is not a PDF becomes a placeholder needing attention, never an item', async () => {
+  const html = Buffer.from('<html><script>alert(1)</script></html>');
+  const { g } = fakeGmail({
+    m1: msg('m1', { pdfs: [{ name: 'invoice.pdf', data: html }] }),
+    m2: msg('m2', { pdfs: [{ name: 'a.pdf', data: pdf('ok') }, { name: 'fake.pdf', data: html }] }),
+  });
+  await ingestMessage(g, 'm1', 'ongoing');
+  const [only] = listItems({ messageId: 'm1' });
+  assert.equal(listItems({ messageId: 'm1' }).length, 1);
+  assert.equal(only.state, 'needs_attention');
+  assert.equal(only.reason, 'no_document');
+  assert.equal(only.hasPdf, false);
+  await ingestMessage(g, 'm2', 'ongoing');
+  const states = listItems({ messageId: 'm2' }).map((i) => `${i.state}:${i.hasPdf}`).sort();
+  assert.deepEqual(states, ['needs_attention:false', 'queued:true']);
+});
+
 test('link-only email: item from downloaded PDF', async () => {
   const { g } = fakeGmail({ m1: msg('m1', { html: '<a href="https://files.example.test/invoice/1">Download invoice</a>' }) });
   await ingestMessage(g, 'm1', 'ongoing', { resolve: publicResolve, fetchImpl: (async () => pdfResponse(pdf('linked'))) as typeof fetch });
@@ -82,13 +99,15 @@ test('no PDF and no links makes a no_document placeholder', async () => {
 });
 
 test('ingest is atomic: failing createItem leaves no email row, retry creates both', async () => {
-  const bad = msg('m1', { pdfs: [{ name: 'a.pdf', data: pdf('1') }, { name: 'b.pdf', data: null as unknown as Buffer }] });
-  const msgs: Record<string, GmailMessage> = { m1: bad };
+  const msgs: Record<string, GmailMessage> = { m1: msg('m1', { pdfs: [{ name: 'a.pdf', data: pdf('1') }, { name: 'b.pdf', data: pdf('2') }] }) };
   const { g } = fakeGmail(msgs);
-  await assert.rejects(ingestMessage(g, 'm1', 'ongoing'));
+  // The second item insert fails inside the transaction.
+  getDb().exec(`CREATE TEMP TRIGGER fail_b BEFORE INSERT ON items WHEN NEW.attachment_name = 'b.pdf'
+                BEGIN SELECT RAISE(ABORT, 'synthetic insert failure'); END;`);
+  await assert.rejects(ingestMessage(g, 'm1', 'ongoing'), /synthetic insert failure/);
   assert.equal(getEmail('m1'), undefined);
   assert.equal(listItems({ messageId: 'm1' }).length, 0);
-  msgs.m1 = msg('m1', { pdfs: [{ name: 'a.pdf', data: pdf('1') }, { name: 'b.pdf', data: pdf('2') }] });
+  getDb().exec('DROP TRIGGER fail_b');
   await ingestMessage(g, 'm1', 'ongoing');
   assert.equal(listItems({ messageId: 'm1' }).length, 2);
 });

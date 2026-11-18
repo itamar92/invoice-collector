@@ -177,6 +177,12 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.get('/items/:id/pdf', wrap((req, res) => {
     const pdf = getItem(param(req, 'id')) ? getItemPdf(param(req, 'id')) : null;
     if (!pdf) throw notFound('pdf');
+    // The bytes came from an email: never sniffed as HTML, no script/same-origin powers, generic name.
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "sandbox; frame-ancestors 'self'",
+      'Content-Disposition': 'inline; filename="document.pdf"',
+    });
     res.type('application/pdf').send(pdf);
   }));
 

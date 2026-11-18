@@ -277,6 +277,11 @@ export function buildMime(to: string, subject: string, filename: string, pdf: Bu
   return Buffer.from(lines.join('\r\n'), 'utf8');
 }
 
+/** PDF magic: `%PDF-` within the first 1024 bytes (readers tolerate a short preamble). */
+export function isPdf(data: Buffer): boolean {
+  return Buffer.isBuffer(data) && data.subarray(0, 1024).includes('%PDF-', 0, 'latin1');
+}
+
 /**
  * Ingests one Gmail message: PDFs become items; with no PDFs, invoice links are downloaded;
  * if nothing usable is found a placeholder item keeps the email visible. Already-ingested ids are skipped.
@@ -289,9 +294,11 @@ export async function ingestMessage(
     return { skipped: true, items: 0 };
   }
   const msg = await gmail.fetchMessage(id);
-  let pdfs = msg.pdfs;
+  // An attachment called .pdf that is not one (no %PDF- header) is never stored as a document.
+  let pdfs = msg.pdfs.filter((p) => isPdf(p.data));
+  const notPdf = msg.pdfs.filter((p) => !isPdf(p.data));
   let failure: Reason | null = null;
-  if (pdfs.length === 0) {
+  if (pdfs.length === 0 && notPdf.length === 0) {
     const got: { name: string; data: Buffer }[] = [];
     for (const url of findInvoiceLinks(msg.html, msg.text)) {
       try {
@@ -311,12 +318,13 @@ export async function ingestMessage(
       messageId: id, threadId: msg.threadId, sender: msg.sender, subject: msg.subject,
       receivedAt: msg.receivedAt, mode,
     });
-    if (pdfs.length === 0) {
+    for (const p of notPdf) createPlaceholderItem(id, 'no_document', p.name);
+    if (pdfs.length === 0 && notPdf.length === 0) {
       createPlaceholderItem(id, failure ?? 'no_document');
       return { skipped: false, items: 1 };
     }
     for (const p of pdfs) createItem(id, p.name, p.data);
-    return { skipped: false, items: pdfs.length };
+    return { skipped: false, items: pdfs.length + notPdf.length };
   })();
 }
 
