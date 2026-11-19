@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { buildFilename, buildFolder } from '../../server/core/naming.js';
 import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
 import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings } from '../api.js';
-import { t } from '../i18n/he.js';
+import { t, tDyn } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
-import { Button, Check, ErrorText, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp } from './ui.js';
+import { Button, Check, ErrorText, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp, useLoad } from './ui.js';
 
 /** Shared by Setup (one step each) and Settings (all of them, editable later). */
 
@@ -428,3 +428,137 @@ export function GeneralSection() {
   );
 }
 
+
+// ---------- telegram bot (settings page only) ----------
+/** The shared bot: one tap makes a pairing link; pressing Start in that chat connects it. */
+function SharedBot() {
+  const { s, save, app } = useSettings();
+  const url = s.settings.telegramRelayUrl;
+  const status = useLoad(() => api.relayStatus(), [url, s.secrets.telegram_relay_auth]);
+  const [link, setLink] = useState<string | null>(null);
+  const [before, setBefore] = useState(0);
+  const [invite, setInvite] = useState('');
+  const [addr, setAddr] = useState(url);
+  const connect = useAction();
+  const saving = useAction();
+  const [saved, setSaved] = useState(false);
+  const st = status.data;
+  const chats = st?.chats ?? [];
+
+  // While the link is out, watch for the chat to appear; then the link has done its job.
+  useEffect(() => {
+    if (!link) return;
+    const id = setInterval(() => { void status.reload(); }, 3000);
+    return () => clearInterval(id);
+  }, [link]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (link && chats.length > before) setLink(null); }, [link, chats.length, before]);
+
+  const start = () => connect.run(async () => {
+    setBefore(chats.length);
+    const r = await api.relayConnect(invite.trim() || undefined);
+    setLink(r.url);
+    await app.refreshSettings();
+  });
+  const unlink = (id: string) => connect.run(async () => { await api.relayUnlink(id); await status.reload(); });
+  const saveAddr = () => saving.run(async () => { await save({ telegramRelayUrl: addr.trim() }); setLink(null); setSaved(true); });
+
+  return (
+    <div className="space-y-3">
+      {!url && <Notice>{t('telegram.relayNone')}</Notice>}
+      {url && (
+        <div className="space-y-2">
+          {st?.botUsername && <p className="text-sm">{t('telegram.bot')} <bdi className="ltr font-medium">@{st.botUsername}</bdi></p>}
+          {st?.error && <ErrorText>{tDyn(`error.${st.error}`, 'error.relay_rejected')}</ErrorText>}
+          <div className="text-base font-semibold">{t('telegram.linked')}</div>
+          {chats.length === 0 && <p className={hintCls}>{t('telegram.linkedNone')}</p>}
+          <ul>
+            {chats.map((c) => (
+              <li key={c.id} className={`flex items-center justify-between gap-2 py-1.5 ${rowCls}`}>
+                <span className="flex min-w-0 items-center gap-2 text-sm"><Check ok labels={[t('common.connected'), t('common.notConnected')]} /><bdi className="truncate font-medium">{c.name || t('telegram.chatNoName')}</bdi></span>
+                <Button variant="ghost" disabled={connect.busy} onClick={() => unlink(c.id)}>{t('telegram.remove')}</Button>
+              </li>
+            ))}
+          </ul>
+          {!s.secrets.telegram_relay_auth && (
+            <input aria-label={t('telegram.invite')} placeholder={t('telegram.invite')} className={`${inputCls} ltr max-w-72`} autoComplete="off"
+              value={invite} onChange={(e) => setInvite(e.target.value)} />
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {link
+              ? <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-semibold text-white hover:bg-accent-deep"><Icon name="out" />{t('telegram.open')}</a>
+              : <Button disabled={connect.busy} onClick={start}>{connect.busy ? t('telegram.connecting') : t('telegram.connect')}</Button>}
+          </div>
+          {link && <p className={hintCls}>{t('telegram.openHint')}</p>}
+          <ErrorText>{connect.error}</ErrorText>
+        </div>
+      )}
+      <Field label={t('telegram.relayUrl')} hint={t('telegram.relayUrlHint')}>
+        <div className="flex gap-2">
+          <input className={`${inputCls} ltr`} inputMode="url" placeholder="https://" value={addr} onChange={(e) => { setAddr(e.target.value); setSaved(false); }} />
+          <Button variant="secondary" disabled={saving.busy || addr.trim() === url} onClick={saveAddr}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+        </div>
+      </Field>
+      <Saved show={saved} />
+      <ErrorText>{saving.error}</ErrorText>
+    </div>
+  );
+}
+
+export function TelegramSection() {
+  const { s, save, saveSecret } = useSettings();
+  const ids = s.settings.telegramChatIds;
+  const [id, setId] = useState('');
+  const [bot, setBot] = useState<string | null>(null);
+  const saving = useAction();
+  const test = useAction();
+  const clean = id.trim();
+  const valid = /^-?\d{1,20}$/.test(clean) && !ids.includes(clean);
+  const add = () => saving.run(async () => { await save({ telegramChatIds: [...ids, clean] }); setId(''); });
+  const remove = (x: string) => saving.run(() => save({ telegramChatIds: ids.filter((i) => i !== x) }));
+  const runTest = () => test.run(async () => {
+    setBot(null);
+    const r = await api.testTelegram();
+    if (!r.ok) throw new Error(r.error || t('error.generic'));
+    setBot(r.username ? `@${r.username}` : '');
+  });
+  const own = s.secrets.telegram_bot_token || ids.length > 0;
+  return (
+    <div className="space-y-4">
+      <p className={hintCls}>{t('telegram.hint')}</p>
+      <SharedBot />
+
+      <div className="space-y-3 rounded-xl bg-ground p-3">
+        <div className="text-base font-semibold">{t('telegram.own')}</div>
+        <p className={hintCls}>{t('telegram.ownHint')}</p>
+        <SecretInput label={t('telegram.token')} configured={s.secrets.telegram_bot_token} onSave={(v) => saveSecret('telegram_bot_token', v)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" className="bg-white" disabled={test.busy || !s.secrets.telegram_bot_token} onClick={runTest}>
+            {test.busy ? t('telegram.testing') : t('telegram.test')}
+          </Button>
+          {bot !== null && <span className="text-sm font-medium text-accent-deep">{t('telegram.testOk')} <bdi className="ltr">{bot}</bdi></span>}
+        </div>
+        <ErrorText>{test.error}</ErrorText>
+
+        <div className="space-y-2 pt-1">
+          <div className="text-sm font-semibold">{t('telegram.chats')}</div>
+          <p className={hintCls}>{t('telegram.chatsHint')}</p>
+          {own && ids.length === 0 && <Notice tone="warn">{t('telegram.none')}</Notice>}
+          <ul>
+            {ids.map((x) => (
+              <li key={x} className={`flex items-center justify-between gap-2 py-1.5 ${rowCls}`}>
+                <bdi className="ltr num font-mono text-sm">{x}</bdi>
+                <Button variant="ghost" disabled={saving.busy} onClick={() => remove(x)}>{t('telegram.remove')}</Button>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <input aria-label={t('telegram.chatId')} placeholder={t('telegram.chatId')} inputMode="numeric" className={`${inputCls} ltr max-w-56`}
+              value={id} onChange={(e) => setId(e.target.value)} />
+            <Button variant="secondary" className="bg-white" disabled={!valid || saving.busy} onClick={add}>{t('telegram.add')}</Button>
+          </div>
+          <ErrorText>{saving.error}</ErrorText>
+        </div>
+      </div>
+    </div>
+  );
+}

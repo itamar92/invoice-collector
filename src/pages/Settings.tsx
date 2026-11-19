@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection } from '../components/SettingsSections.js';
+import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, TelegramSection } from '../components/SettingsSections.js';
 import { ButtonLink, Card, Notice, PageTitle, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 
@@ -17,6 +17,7 @@ export default function Settings() {
       <Card title={t('settings.connections')}><ConnectionsSection /></Card>
       <Card title={t('settings.ai')}><AiSection /></Card>
       <Card title={t('settings.label')}><LabelSection /></Card>
+      <Card title={t('settings.telegram')}><TelegramSection /></Card>
       <Card title={t('settings.categories')}><CategoriesSection /></Card>
       <Card title={t('settings.general')}><GeneralSection /></Card>
     </div>

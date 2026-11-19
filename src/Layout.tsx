@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api, GMAIL_SEND_SCOPE } from './api.js';
 import type { SettingsResponse } from './api.js';
-import { Button, CountBadge, ErrorText, fmtDateTime, Icon, useAction, useApp } from './components/ui.js';
+import { Button, CountBadge, ErrorText, fmtDateTime, Icon, Notice, useAction, useApp } from './components/ui.js';
+import { useUploadReceipt } from './components/UploadReceipt.js';
 import type { IconName } from './components/ui.js';
 import { t } from './i18n/he.js';
 import type { MessageKey } from './i18n/he.js';
@@ -48,6 +49,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const run = useAction();
+  const upload = useUploadReceipt();
   const problems = settings ? connectionProblems(settings) : [];
   const active = !!settings?.settings.setupComplete && !!settings?.settings.backfillDone;
   const inMore = MORE.some((n) => loc.pathname.startsWith(n.to));
@@ -74,15 +76,21 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
     <div className="min-h-dvh md:flex">
       {/* phone: top bar with the worker status */}
       <header className="sticky top-0 z-20 border-b border-line bg-ground md:hidden">
-        <div className="flex items-center justify-between gap-3 px-4 py-2">
+        <div className="flex items-center justify-between gap-2 px-4 py-2">
           <Link to="/attention" className="min-w-0">
             <Brand />
           </Link>
-          <Button variant="secondary" className="shrink-0 bg-white shadow-soft" disabled={run.busy} onClick={runNow}>
-            {run.busy ? t('worker.running') : t('worker.runNow')}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="secondary" className="bg-white px-3 shadow-soft" disabled={run.busy} onClick={runNow}>
+              {run.busy ? t('worker.running') : t('worker.runNow')}
+            </Button>
+            <Button className="w-11 px-0 shadow-soft" disabled={upload.busy} onClick={upload.pick} aria-label={t('upload.button')} title={t('upload.button')}>
+              <Icon name="camera" />
+            </Button>
+          </div>
         </div>
       </header>
+      {upload.input}
 
       {/* desktop: rail on the start (right) side */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-e border-line p-4 md:flex">
@@ -97,6 +105,9 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </NavLink>
           ))}
         </nav>
+        <Button className="mx-2 mt-4 shadow-soft" disabled={upload.busy} onClick={upload.pick}>
+          <Icon name="camera" />{t('upload.button')}
+        </Button>
         <div className="mt-auto space-y-2 px-2 text-xs text-muted">
           <p>{lastRun}</p>
           {!active && <p>{t('worker.notActive')}</p>}
@@ -111,6 +122,8 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <div className="mx-auto max-w-4xl space-y-4">
           <p className="text-xs text-muted md:hidden">{lastRun}</p>
           <ErrorText>{run.error}</ErrorText>
+          {upload.busy && <Notice>{t('upload.busy')}</Notice>}
+          <ErrorText>{upload.error}</ErrorText>
           {summary?.lastTickError && <ErrorText>{t('banner.tickError', { error: summary.lastTickError })}</ErrorText>}
           {problems.length > 0 && (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warn-tint px-3 py-2 text-sm">

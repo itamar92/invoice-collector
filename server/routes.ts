@@ -17,6 +17,7 @@ import { compileRecipe, RecipeError } from './core/recipe.js';
 import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
+import type { Item } from './core/items.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
@@ -28,6 +29,9 @@ import type { SecretKey } from './secrets.js';
 import { getSettings, updateSettings } from './settings.js';
 import type { Settings } from './settings.js';
 import type { GmailSource } from './sources/gmail.js';
+import { relayClient, relayConfig, RelayError, type RelayClient } from './sources/relayClient.js';
+import { telegramBotInfo } from './sources/telegram.js';
+import { createUpload, MAX_UPLOAD_BYTES, runUpload, UploadError } from './sources/upload.js';
 
 export { sanitizeError };
 
@@ -42,6 +46,10 @@ export interface ApiContext {
   detectMorning?: () => Promise<{ api_fields: boolean; api_file: boolean }>;
   /** Injectable for tests; default reads the categories from Morning (read-only GET). */
   morningClassifications?: () => Promise<MorningClassification[]>;
+  /** Injectable for tests; default asks Telegram who the bot is (read-only getMe). */
+  telegramInfo?: () => Promise<{ username: string }>;
+  /** Injectable for tests; default talks to the shared-bot hub over HTTP. */
+  relayClient?: (url: string, auth: string | null) => RelayClient;
   now?: () => Date;
 }
 
@@ -117,6 +125,8 @@ const SettingsPatch = z.object({
   timezone: z.string().refine((tz) => {
     try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; }
   }, 'unknown timezone'),
+  telegramChatIds: z.array(z.string().regex(/^-?\d{1,20}$/)).max(10),
+  telegramRelayUrl: z.string().trim().max(300).regex(/^(https?:\/\/[^\s]+)?$/),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -196,6 +206,25 @@ export function apiRouter(ctx: ApiContext): express.Router {
       'Content-Disposition': 'inline; filename="document.pdf"',
     });
     res.type('application/pdf').send(pdf);
+  }));
+
+  // A photographed paper receipt (JPEG) or a PDF, as the raw request body. Read and filed like an emailed one.
+  r.post('/uploads', express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }), wrap(async (req, res) => {
+    if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'unsupported_file');
+    const { name } = parse(z.object({ name: z.string().max(300).optional() }), req.query);
+    let created: { id: string; duplicateOf?: string };
+    try { created = createUpload('upload', name, req.body, clock()); } catch (e) {
+      if (e instanceof UploadError) throw new HttpError(e.code === 'too_large' ? 413 : 400, e.code);
+      throw e;
+    }
+    const lean = ({ text: _text, ...rest }: Item) => rest;
+    if (created.duplicateOf) {
+      res.json({ id: created.duplicateOf, duplicate: true, item: lean(getItem(created.duplicateOf)!) });
+      return;
+    }
+    let deps: Deps | null = null;
+    try { deps = ctx.getDeps().deps; } catch { /* not connected yet: stays queued for the worker */ }
+    res.status(201).json({ id: created.id, duplicate: false, item: lean(await runUpload(created.id, deps)) });
   }));
 
   const EDITABLE: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_backfill_approval', 'ready'];
@@ -397,6 +426,10 @@ export function apiRouter(ctx: ApiContext): express.Router {
 
   r.put('/settings', wrap((req, res) => {
     const patch = parse(SettingsPatch, req.body);
+    // The stored credential belongs to the hub it was issued by: never carry it over to another address.
+    if (patch.telegramRelayUrl !== undefined && patch.telegramRelayUrl !== getSettings().telegramRelayUrl) {
+      setSecret('telegram_relay_auth', null);
+    }
     res.json({ settings: publicSettings(updateSettings(patch as Partial<Settings>)), secrets: secretStatus(), morningModes });
   }));
 
@@ -425,6 +458,63 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ modes: morningModes, verified: false });
   }));
 
+  r.post('/telegram/test', wrap(async (_req, res) => {
+    try {
+      res.json({ ok: true, ...(await (ctx.telegramInfo ?? telegramBotInfo)()) });
+    } catch (e) {
+      res.json({ ok: false, error: sanitizeError(e instanceof Error ? e.message : String(e)) });
+    }
+  }));
+
+  // ---------- shared Telegram bot (hub) ----------
+  const relay = (needAuth: boolean) => {
+    const { url, auth } = relayConfig();
+    if (!url) throw new HttpError(400, 'relay_not_configured');
+    if (needAuth && !auth) throw new HttpError(409, 'relay_not_connected');
+    return (ctx.relayClient ?? relayClient)(url, auth);
+  };
+  /** Hub failures reach the UI as a clean 502 with the hub's code. */
+  const viaRelay = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try { return await fn(); } catch (e) {
+      // 404 from the address itself: nothing there speaks the hub's protocol.
+      if (e instanceof RelayError) throw new HttpError(502, e.code === 'not_found' ? 'relay_not_found' : e.code);
+      throw e;
+    }
+  };
+
+  r.get('/telegram/relay', wrap(async (_req, res) => {
+    const { url, auth } = relayConfig();
+    if (!url || !auth) { res.json({ configured: !!url, connected: false, botUsername: null, chats: [] }); return; }
+    try {
+      res.json({ configured: true, connected: true, ...(await relay(true).status()) });
+    } catch (e) {
+      if (!(e instanceof RelayError)) throw e;
+      res.json({ configured: true, connected: true, botUsername: null, chats: [], error: e.code });
+    }
+  }));
+
+  // A pairing link for the owner to open in Telegram. Registers this instance with the hub on first use.
+  r.post('/telegram/relay/connect', wrap(async (req, res) => {
+    const { invite } = parse(z.object({ invite: z.string().trim().max(200).optional() }).strict(), req.body);
+    const pair = async () => {
+      if (!relayConfig().auth) setSecret('telegram_relay_auth', await relay(false).register(invite || undefined));
+      return relay(true).pair();
+    };
+    res.json(await viaRelay(async () => {
+      try { return await pair(); } catch (e) {
+        // The hub no longer knows this instance (its data was reset): register again, once.
+        if (!(e instanceof RelayError) || e.status !== 401) throw e;
+        setSecret('telegram_relay_auth', null);
+        return pair();
+      }
+    }));
+  }));
+
+  r.delete('/telegram/relay/chats/:id', wrap(async (req, res) => {
+    await viaRelay(() => relay(true).unlink(param(req, 'id')));
+    res.json({ ok: true });
+  }));
+
   r.get('/morning/classifications', wrap(async (_req, res) => {
     try {
       res.json({ classifications: await (ctx.morningClassifications ?? fetchMorningClassifications)() });
@@ -447,6 +537,8 @@ export function apiRouter(ctx: ApiContext): express.Router {
       res.status(400).json({ error: 'invalid_recipe', message: err.message });
     } else if (err instanceof HttpError) {
       res.status(err.status).json({ error: err.code });
+    } else if ((err as { type?: string } | null)?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'too_large' });
     } else {
       console.error('api error:', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'internal_error' });

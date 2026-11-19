@@ -28,6 +28,10 @@ export interface ItemFilter {
 
 const now = () => new Date().toISOString();
 
+/** Source rows of documents the owner uploaded (app or chat bot) carry this id prefix instead of a Gmail id. */
+export const UPLOAD_PREFIX = 'upload:';
+export const isUploadId = (messageId: string): boolean => messageId.startsWith(UPLOAD_PREFIX);
+
 export function isTerminal(state: ItemState): boolean {
   return TERMINAL_STATES.includes(state);
 }

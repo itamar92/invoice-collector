@@ -124,6 +124,38 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       );
     `,
   },
+  {
+    // Shared Telegram bot hub (server/relay/hub.ts); stays empty on an instance that does not run one.
+    version: 7,
+    sql: `
+      CREATE TABLE relay_tenants (
+        id TEXT PRIMARY KEY,
+        secret_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT
+      );
+      CREATE TABLE relay_pair_codes (
+        code TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES relay_tenants (id),
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE relay_chats (
+        chat_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES relay_tenants (id),
+        name TEXT,
+        linked_at TEXT NOT NULL
+      );
+      CREATE TABLE relay_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id TEXT NOT NULL REFERENCES relay_tenants (id),
+        chat_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        file_name TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX relay_updates_tenant ON relay_updates (tenant_id, id);
+    `,
+  },
 ];
 
 export function migrate(db: Db, migrations = MIGRATIONS): void {

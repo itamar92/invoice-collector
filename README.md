@@ -9,6 +9,8 @@ overridable in Settings.
 ## Features
 
 - Gmail ingest, optionally limited to one label; an email is marked handled only after all its items are done.
+- Paper receipts: upload a photo or PDF from the app, or send it to a Telegram bot (your own, or one shared bot
+  serving many instances); same pipeline as email.
 - Recipes validated by a schema, regex run through RE2 only; AI fallback (Anthropic, OpenAI, Gemini or SSH agent).
 - Dropbox filing with configurable folder and filename templates; never overwrites existing files.
 - Morning expense hand-off with duplicate and personal-vendor safeguards.
