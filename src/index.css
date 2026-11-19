@@ -1,10 +1,78 @@
+@import "@fontsource-variable/noto-sans-hebrew/wght.css";
+@import "@fontsource-variable/fredoka/wght.css";
 @import "tailwindcss";
 
+/*
+ * Warm and friendly: a soft rosy ground, white rounded panels, basil green for actions.
+ * State colours keep one meaning each: alert (coral) needs you, warn (honey) is waiting,
+ * info (periwinkle) is in process, ok (green) is filed, idle (grey) is ignored.
+ */
 @theme {
-  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-ink: #2a2130;
+  --color-muted: #6c5f70;
+  --color-ground: #f8f1ee;
+  --color-ground-deep: #f0e5e0;
+  --color-line: #eee4df;
+  --color-line-strong: #d8c9c3;
+  --color-accent: #1f7a55;
+  --color-accent-deep: #17604a;
+  --color-accent-tint: #dcf0e6;
+  --color-alert: #cf3f33;
+  --color-alert-deep: #a32b21;
+  --color-alert-tint: #fde6e1;
+  --color-warn: #e6a41a;
+  --color-warn-deep: #7a5200;
+  --color-warn-tint: #fdf0cf;
+  --color-info: #6a7be0;
+  --color-info-deep: #3644a6;
+  --color-info-tint: #e6eafc;
+  --color-ok: #2e9a6b;
+  --color-ok-tint: #dcf0e6;
+  --color-idle: #a79ca8;
+  --color-idle-tint: #efebef;
+  --color-lilac-deep: #6f3a8c;
+  --color-lilac-tint: #f1e4f8;
+
+  --font-sans: "Noto Sans Hebrew Variable", "Noto Sans Hebrew", system-ui, "Arial Hebrew", Arial, sans-serif;
+  --font-display: "Fredoka Variable", "Noto Sans Hebrew Variable", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --shadow-soft: 0 1px 2px rgb(70 35 45 / 0.05), 0 8px 20px -8px rgb(70 35 45 / 0.12);
+  --shadow-bar: 0 -1px 2px rgb(70 35 45 / 0.04), 0 -8px 20px -8px rgb(70 35 45 / 0.12);
 }
 
-html, body { background: var(--color-slate-50); color: var(--color-slate-900); }
-input, select, textarea { font: inherit; }
+@layer base {
+  html { background: var(--color-ground); color: var(--color-ink); scrollbar-color: var(--color-line-strong) transparent; scrollbar-width: thin; }
+  body { font-size: 15px; line-height: 1.45; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
+  input, select, textarea { font: inherit; }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--color-accent); }
+  ::selection { background: var(--color-accent-tint); color: var(--color-ink); }
+  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  input, textarea { caret-color: var(--color-accent); }
+  a { text-underline-offset: 3px; }
+}
+
+/* Chart series: eight fixed category colours, assigned in order and never cycled. A ninth category folds into "other". */
+:root {
+  --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a; --cat-4: #eda100;
+  --cat-5: #e87ba4; --cat-6: #008300; --cat-7: #6250d6; --cat-8: #e34948;
+  --cat-other: #8b8089; --cat-none: #c9c0c8;
+}
+
 /* Paths, filenames, JSON, emails stay left-to-right inside the RTL page. */
 .ltr { direction: ltr; unicode-bidi: isolate; text-align: left; }
+/* Dates and amounts: left-to-right digits that still align to the row's end edge. */
+.num { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+
+/* Headings: the rounded face. */
+.display { font-family: var(--font-display); font-weight: 600; line-height: 1.15; text-wrap: balance; }
+
+/* A white rounded surface on the tinted ground. */
+.panel { background: var(--color-white); border-radius: 1.25rem; box-shadow: var(--shadow-soft); padding: 1rem; }
+@media (min-width: 48rem) { .panel { padding: 1.25rem; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

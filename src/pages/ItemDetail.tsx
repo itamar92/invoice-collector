@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import type { ExtractedFields, ItemState, Reason } from '../api.js';
 import {
-  Button, Card, ErrorText, Field, fmtDateTime, inputCls, itemTitle, Loading, Notice, PageTitle, reasonLabel,
+  Button, Card, ErrorText, Field, fmtDateTime, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
   StateBadge, stateLabel, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
@@ -89,49 +89,48 @@ export default function ItemDetail() {
 
   return (
     <div className="space-y-4">
-      <PageTitle actions={<Button variant="ghost" onClick={() => navigate(-1)}>{t('common.back')}</Button>}>
-        <span className="me-2">{itemTitle(item)}</span><StateBadge state={item.state} />
-      </PageTitle>
-      {item.reason && item.state === 'needs_attention' && <Notice tone="warn">{t('common.reason')}: {reasonLabel(item.reason)}</Notice>}
+      <div>
+        <button type="button" onClick={() => navigate(-1)} className="mb-1 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-accent">
+          <Icon name="back" className="size-4" />{t('common.back')}
+        </button>
+        <h1 className="display text-[26px] md:text-3xl">{itemTitle(item)}</h1>
+        <div className="mt-1.5"><StateBadge state={item.state} /></div>
+      </div>
+      {item.reason && item.state === 'needs_attention' && <ErrorText>{t('common.reason')}: {reasonLabel(item.reason)}</ErrorText>}
       {msg && <Notice tone="ok">{msg}</Notice>}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title={t('item.pdfTitle')} className="lg:order-2">
-          {item.hasPdf
-            ? <iframe title={t('item.pdfTitle')} src={api.pdfUrl(item.id)} className="h-[70vh] w-full rounded-lg border border-slate-200 bg-slate-100" />
-            : <p className="text-sm text-slate-500">{t('item.noPdf')}</p>}
-        </Card>
-
+      {/* Phone: fields first, the document below. Desktop: side by side, the document stays in view. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <Card title={t('item.fields')}>
-          {!editable && <p className="mb-3 text-xs text-slate-500">{t('item.readOnly')}</p>}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t('field.vendorName')}>{input('vendorName')}</Field>
-            <Field label={t('field.vendorTaxId')}>{input('vendorTaxId', { ltr: true })}</Field>
-            <Field label={t('field.docType')}>
+          {!editable && <p className="mb-2 text-xs text-muted">{t('item.readOnly')}</p>}
+          <div className="grid grid-cols-6 gap-x-2.5 gap-y-2.5">
+            <Field className="col-span-6" label={t('field.vendorName')}>{input('vendorName')}</Field>
+            <Field className="col-span-2" label={t('field.total')}>{input('total', { ltr: true })}</Field>
+            <Field className="col-span-2" label={t('field.vat')}>{input('vat', { ltr: true })}</Field>
+            <Field className="col-span-2" label={t('field.net')}>{input('net', { ltr: true })}</Field>
+            <Field className="col-span-3" label={t('field.issueDate')}>{input('issueDate', { type: 'date', ltr: true })}</Field>
+            <Field className="col-span-3" label={t('field.currency')}>{input('currency', { ltr: true })}</Field>
+            <Field className="col-span-3" label={t('field.docType')}>
               <select disabled={!editable} className={inputCls} value={draft.docType} onChange={(e) => setDraft({ ...draft, docType: e.target.value })}>
                 <option value="">{t('field.choose')}</option>
                 {DOC_TYPES.map((d) => <option key={d} value={d}>{t(`docType.${d}` as MessageKey)}</option>)}
               </select>
             </Field>
-            <Field label={t('field.docNumber')}>{input('docNumber', { ltr: true })}</Field>
-            <Field label={t('field.issueDate')}>{input('issueDate', { type: 'date', ltr: true })}</Field>
-            <Field label={t('field.category')}>
+            <Field className="col-span-3" label={t('field.docNumber')}>{input('docNumber', { ltr: true })}</Field>
+            <Field className="col-span-6" label={t('field.category')}>
               <select disabled={!editable} className={inputCls} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
                 <option value="">{t('field.choose')}</option>
                 {[...new Set([...categories, ...(draft.category ? [draft.category] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
-            <Field label={t('field.total')}>{input('total', { ltr: true })}</Field>
-            <Field label={t('field.vat')}>{input('vat', { ltr: true })}</Field>
-            <Field label={t('field.net')}>{input('net', { ltr: true })}</Field>
-            <Field label={t('field.currency')}>{input('currency', { ltr: true })}</Field>
-            <Field label={t('field.allocationNumber')}>{input('allocationNumber', { ltr: true })}</Field>
-            <Field label={t('field.description')}>{input('description')}</Field>
+            <Field className="col-span-3" label={t('field.vendorTaxId')}>{input('vendorTaxId', { ltr: true })}</Field>
+            <Field className="col-span-3" label={t('field.allocationNumber')}>{input('allocationNumber', { ltr: true })}</Field>
+            <Field className="col-span-6" label={t('field.description')}>{input('description')}</Field>
           </div>
 
           {patch === null && <ErrorText>{t('error.invalid_request')}</ErrorText>}
           {problems.length > 0 && (
-            <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <div className="mt-3 rounded-xl bg-warn-tint p-3 text-sm">
               {t('item.invalid')}
               <ul className="list-disc ps-5">{problems.map((p) => <li key={p}>{reasonLabel(p)}</li>)}</ul>
             </div>
@@ -141,26 +140,32 @@ export default function ItemDetail() {
             {editable && <Button disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
             {editable && item.emailMode !== 'backfill' && <Button variant="secondary" disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
             {item.state === 'needs_attention' && <Button variant="secondary" disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
-            {!TERMINAL.includes(item.state) && <Button variant="danger" disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
+            {!TERMINAL.includes(item.state) && <Button variant="danger" className="ms-auto" disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
           </div>
           <ErrorText>{act.error}</ErrorText>
 
-          <dl className="mt-4 space-y-1 text-xs text-slate-600">
-            {item.attachmentName && <div><dt className="inline font-medium">{t('item.attachment')}: </dt><dd className="inline"><bdi>{item.attachmentName}</bdi></dd></div>}
-            {item.provenance && <div><dt className="inline font-medium">{t('item.provenance')}: </dt><dd className="inline">{t(`item.provenance.${item.provenance}` as MessageKey)}</dd></div>}
-            {item.storagePath && <div><dt className="inline font-medium">{t('item.storagePath')}: </dt><dd className="inline"><bdi className="ltr font-mono">{item.storagePath}</bdi></dd></div>}
-            {item.accountingRef && <div><dt className="inline font-medium">{t('item.accounting')}: </dt><dd className="inline"><bdi className="ltr font-mono">{item.accountingMode} · {item.accountingRef}</bdi></dd></div>}
+          <dl className="mt-4 space-y-1 text-xs text-muted">
+            {item.attachmentName && <div><dt className="inline font-semibold">{t('item.attachment')}: </dt><dd className="inline"><bdi>{item.attachmentName}</bdi></dd></div>}
+            {item.provenance && <div><dt className="inline font-semibold">{t('item.provenance')}: </dt><dd className="inline">{t(`item.provenance.${item.provenance}` as MessageKey)}</dd></div>}
+            {item.storagePath && <div><dt className="inline font-semibold">{t('item.storagePath')}: </dt><dd className="inline"><bdi className="ltr break-all font-mono">{item.storagePath}</bdi></dd></div>}
+            {item.accountingRef && <div><dt className="inline font-semibold">{t('item.accounting')}: </dt><dd className="inline"><bdi className="ltr break-all font-mono">{item.accountingMode} · {item.accountingRef}</bdi></dd></div>}
           </dl>
+        </Card>
+
+        <Card title={t('item.pdfTitle')} className="lg:sticky lg:top-8 lg:self-start">
+          {item.hasPdf
+            ? <iframe title={t('item.pdfTitle')} src={api.pdfUrl(item.id)} className="h-[70dvh] w-full rounded-xl border border-line bg-ground lg:h-[calc(100dvh-10rem)]" />
+            : <p className="text-sm text-muted">{t('item.noPdf')}</p>}
         </Card>
       </div>
 
       <Card title={t('item.history')}>
-        <ol className="space-y-2 text-sm">
+        <ol className="text-sm">
           {item.events.map((e, i) => (
-            <li key={i} className="flex flex-wrap gap-x-3 gap-y-0.5 border-b border-slate-100 pb-2">
-              <span className="whitespace-nowrap text-slate-500">{fmtDateTime(e.at)}</span>
+            <li key={i} className={`flex flex-wrap gap-x-3 gap-y-0.5 py-1.5 ${rowCls}`}>
+              <span className="num text-muted">{fmtDateTime(e.at)}</span>
               <span>{e.from && e.from !== e.to ? `${stateLabel(e.from)} ← ` : ''}{stateLabel(e.to)}</span>
-              {e.note && <bdi className="ltr font-mono text-xs text-slate-500">{e.note}</bdi>}
+              {e.note && <bdi className="ltr break-all font-mono text-xs text-muted">{e.note}</bdi>}
             </li>
           ))}
         </ol>
@@ -168,4 +173,3 @@ export default function ItemDetail() {
     </div>
   );
 }
-

@@ -142,6 +142,22 @@ seedItem({ vendor: hosting, state: 'ready', total: 59 });
 seedItem({ vendor: cell, state: 'stored', total: 120.5, storagePath: `/חשבוניות/${year}/טלפון/demo.pdf` });
 seedItem({ vendor: hosting, state: 'done', total: 47.2, storagePath: `/חשבוניות/${year}/תוכנות/demo.pdf`, accounting: true, worth: true });
 seedItem({ vendor: cell, state: 'done', total: 99.9, storagePath: `/חשבוניות/${year}/טלפון/demo-2.pdf`, accounting: true });
+// A spread of filed documents over the year, so the dashboard has something to show.
+const FILED: [(typeof VENDORS)[number], number, string | undefined][] = [
+  [cell, 99.9, undefined], [hosting, 47.2, undefined], [clinic, 320, undefined], [cell, 104.5, undefined],
+  [hosting, 47.2, 'ציוד משרדי'], [cell, 99.9, undefined], [hosting, 189, 'קידום ופרסום'], [clinic, 180, undefined],
+  [cell, 112.3, undefined], [hosting, 47.2, undefined], [hosting, 640, 'ציוד משרדי'], [cell, 99.9, undefined],
+  [hosting, 47.2, undefined], [cell, 99.9, undefined], [hosting, 75, undefined],
+];
+const thisMonth = new Date().getMonth() + 1;
+FILED.forEach(([vendor, total, category], i) => {
+  const month = String((i % thisMonth) + 1).padStart(2, '0');
+  seedItem({
+    vendor, state: vendor.status === 'business' ? 'done' : 'stored', total, accounting: vendor.status === 'business',
+    storagePath: `/חשבוניות/${year}/${category ?? vendor.category}/demo-${i}.pdf`,
+    over: { issueDate: `${year}-${month}-${String(3 + (i % 20)).padStart(2, '0')}`, ...(category ? { category } : {}), ...(i === 6 ? { category: null } : {}) },
+  });
+});
 seedItem({ vendor: newsletter, state: 'ignored' });
 seedItem({ vendor: clinic, state: 'dismissed', total: 180 });
 

@@ -232,6 +232,43 @@ test('items list omits text; detail has events; pdf served as application/pdf; r
   assert.equal((await call('POST', `/api/items/${id}/dismiss`)).status, 409);
 });
 
+test('stats: filed documents per category and month for a year; other states, years and currencies stay out of amounts', async () => {
+  const filed = (tag: string, fields: Partial<ExtractedFields>, state: 'stored' | 'done' = 'done') => {
+    const id = item('awaiting_vendor', { docNumber: tag, ...fields }, tag);
+    getDb().prepare('UPDATE items SET state = ? WHERE id = ?').run(state, id);
+  };
+  filed('a', { category: 'טלפון', total: 100, issueDate: '2026-01-10' });
+  filed('b', { category: 'טלפון', total: 50.5, issueDate: '2026-03-02' }, 'stored');
+  filed('c', { category: 'תוכנות', total: 30, issueDate: '2026-03-20' });
+  filed('d', { category: null, total: 7, issueDate: '2026-12-31' });
+  filed('e', { category: 'תוכנות', total: 999, currency: 'USD', issueDate: '2026-05-05' });
+  filed('f', { category: 'טלפון', total: 80, issueDate: '2025-11-11' });
+  item('needs_attention', { docNumber: 'g', category: 'טלפון', total: 500, issueDate: '2026-02-02' }, 'g');
+  const { call } = await boot();
+
+  const s = (await (await call('GET', '/api/stats')).json()) as any; // the clock says 2026
+  assert.equal(s.year, 2026);
+  assert.deepEqual(s.years, [2026, 2025]);
+  assert.equal(s.count, 5);
+  assert.equal(s.total, 187.5);
+  assert.equal(s.otherCurrency, 1);
+  assert.deepEqual(s.categories, [
+    { category: 'טלפון', count: 2, total: 150.5 },
+    { category: 'תוכנות', count: 2, total: 30 },
+    { category: null, count: 1, total: 7 },
+  ]);
+  assert.equal(s.months.length, 12);
+  assert.deepEqual(s.months[2].parts.sort((a: any, b: any) => a.category.localeCompare(b.category)),
+    [{ category: 'טלפון', count: 1 }, { category: 'תוכנות', count: 1 }]);
+  assert.deepEqual({ ...s.months[2], parts: null }, { month: 3, count: 2, total: 80.5, parts: null });
+  assert.deepEqual(s.months[4], { month: 5, count: 1, total: 0, parts: [{ category: 'תוכנות', count: 1 }] });
+  assert.deepEqual(s.months[5].parts, []);
+
+  const prev = (await (await call('GET', '/api/stats?year=2025')).json()) as any;
+  assert.deepEqual(prev.categories, [{ category: 'טלפון', count: 1, total: 80 }]);
+  assert.equal((await call('GET', '/api/stats?year=nope')).status, 400);
+});
+
 test('summary: attention includes open ingest failures; lastTickError is sanitized', async () => {
   item('needs_attention', null, 'a');
   item('awaiting_vendor', null, 'b');

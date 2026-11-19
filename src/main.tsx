@@ -9,6 +9,7 @@ import { t } from './i18n/he.js';
 import Layout from './Layout.js';
 import Attention from './pages/Attention.js';
 import Backfill from './pages/Backfill.js';
+import Dashboard from './pages/Dashboard.js';
 import Invoices from './pages/Invoices.js';
 import ItemDetail from './pages/ItemDetail.js';
 import Login from './pages/Login.js';
@@ -75,6 +76,7 @@ function App() {
           <Route path="attention" element={page(<Attention />)} />
           <Route path="items/:id" element={page(<ItemDetail />)} />
           <Route path="invoices" element={page(<Invoices />)} />
+          <Route path="dashboard" element={page(<Dashboard />)} />
           <Route path="backfill" element={page(<Backfill />)} />
           <Route path="vendors" element={page(<Vendors />)} />
           <Route path="missed" element={page(<Missed />)} />

@@ -2,8 +2,8 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Item, Vendor, VendorStatus } from '../api.js';
 import {
-  Button, ButtonLink, Card, ErrorText, fmtDate, fmtDateTime, fmtMoney, itemTitle, Loading, Notice, PageTitle,
-  reasonLabel, useAction, useApp, useLoad,
+  Avatar, Button, ButtonLink, Card, Dot, Icon, ErrorText, fmtDate, fmtDateTime, fmtMoney, itemTitle, Loading, Notice, PageTitle,
+  reasonLabel, rowCls, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 
@@ -30,17 +30,22 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
   if (!load.data?.length) return load.error ? <ErrorText>{load.error}</ErrorText> : null;
   return (
     <Card title={t('attention.newVendors')}>
-      <p className="mb-3 text-sm text-slate-600">{t('attention.newVendorsHint')}</p>
-      <ul className="divide-y divide-slate-100">
+      <p className="text-[13px] text-muted">{t('attention.newVendorsHint')}</p>
+      <ul>
         {load.data.map(({ v, n }) => (
-          <li key={v.key} className="flex flex-wrap items-center justify-between gap-2 py-3">
-            <div>
-              <div className="font-medium">{v.displayName}</div>
-              <div className="text-xs text-slate-500">{t('attention.waitingItems', { n })}</div>
+          <li key={v.key} className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 py-3 ${rowCls}`}>
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar name={v.displayName} />
+              <div className="min-w-0">
+                <div className="font-semibold">{v.displayName}</div>
+                <div className="text-[13px] text-muted">{t('attention.waitingItems', { n })}</div>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            {/* The discarding choice stands apart from the two that keep the documents. */}
+            <div className="flex w-full gap-2 sm:w-auto">
               {DECISIONS.map((s) => (
                 <Button key={s} variant={s === 'business' ? 'primary' : s === 'ignored' ? 'danger' : 'secondary'}
+                  className={s === 'ignored' ? 'ms-auto sm:ms-3' : 'min-w-20 flex-1 sm:flex-none'}
                   disabled={act.busy} title={t(`vendorStatus.${s}Hint`)} onClick={() => decide(v, s)}>
                   {t(`vendorStatus.${s}`)}
                 </Button>
@@ -56,15 +61,16 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
 
 export function ItemList({ items }: { items: Item[] }) {
   return (
-    <ul className="divide-y divide-slate-100">
+    <ul>
       {items.map((i) => (
-        <li key={i.id}>
-          <Link to={`/items/${i.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 hover:bg-slate-50">
-            <span className="font-medium text-teal-900">{itemTitle(i)}</span>
-            <span className="flex gap-4 text-sm text-slate-600">
-              <span>{fmtDate(i.fields?.issueDate ?? i.createdAt)}</span>
-              <span>{fmtMoney(i.fields?.total, i.fields?.currency)}</span>
+        <li key={i.id} className={rowCls}>
+          <Link to={`/items/${i.id}`} className="-mx-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 rounded-xl px-2 py-2 transition-colors hover:bg-ground">
+            <Avatar name={itemTitle(i)} />
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{itemTitle(i)}</span>
+              <span className="num block text-[13px] text-muted">{fmtDate(i.fields?.issueDate ?? i.createdAt)}</span>
             </span>
+            <span className="num font-semibold">{fmtMoney(i.fields?.total, i.fields?.currency)}</span>
           </Link>
         </li>
       ))}
@@ -99,15 +105,20 @@ export default function Attention() {
       <VendorDecisions />
       {data.loading && !d && <Loading />}
       <ErrorText>{data.error}</ErrorText>
-      {empty && <Notice tone="ok">{t('attention.allClear')}</Notice>}
+      {empty && (
+        <div className="panel flex flex-col items-center gap-3 py-10 text-center">
+          <span className="grid size-14 place-items-center rounded-full bg-ok-tint text-accent-deep"><Icon name="check" className="size-7" /></span>
+          <p className="display text-lg">{t('attention.allClear')}</p>
+        </div>
+      )}
 
       {d && d.byReason.length > 0 && (
         <Card title={t('attention.needs')}>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {d.byReason.map(([reason, items]) => (
               <div key={reason}>
-                <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-red-800">
-                  {reasonLabel(reason)} <span className="rounded-full bg-red-100 px-2 text-xs">{items.length}</span>
+                <h3 className="flex items-center gap-2 rounded-lg bg-alert-tint px-2.5 py-1.5 text-[13px] font-semibold text-alert-deep">
+                  <Dot className="bg-alert" /><span className="flex-1">{reasonLabel(reason)}</span><span className="num">{items.length}</span>
                 </h3>
                 <ItemList items={items} />
               </div>
@@ -118,19 +129,19 @@ export default function Attention() {
 
       {d && d.lateBackfill.length > 0 && (
         <Card title={t('attention.backfillLate')} actions={<ButtonLink to="/backfill" variant="secondary">{t('nav.backfill')}</ButtonLink>}>
-          <p className="mb-2 text-sm text-slate-600">{t('attention.backfillLateHint')}</p>
+          <p className="text-[13px] text-muted">{t('attention.backfillLateHint')}</p>
           <ItemList items={d.lateBackfill} />
         </Card>
       )}
 
       {d && d.failures.length > 0 && (
         <Card title={t('attention.ingest')}>
-          <p className="mb-2 text-sm text-slate-600">{t('attention.ingestHint')}</p>
-          <ul className="divide-y divide-slate-100 text-sm">
+          <p className="text-[13px] text-muted">{t('attention.ingestHint')}</p>
+          <ul className="text-sm">
             {d.failures.map((f) => (
-              <li key={f.messageId} className="py-2">
-                <div className="text-slate-800">{f.error}</div>
-                <div className="text-xs text-slate-500">{t('common.attempts')}: {f.attempts} · {fmtDateTime(f.lastAt)}</div>
+              <li key={f.messageId} className={`py-2 ${rowCls}`}>
+                <div className="[overflow-wrap:anywhere]">{f.error}</div>
+                <div className="text-xs text-muted">{t('common.attempts')}: {f.attempts} · {fmtDateTime(f.lastAt)}</div>
               </li>
             ))}
           </ul>
@@ -139,22 +150,23 @@ export default function Attention() {
 
       {d && d.waitingAi.length > 0 && (
         <Card title={t('attention.waitingAi')}>
-          <p className="mb-2 text-sm text-slate-600">{t('attention.waitingAiHint')}</p>
+          <p className="text-[13px] text-muted">{t('attention.waitingAiHint')}</p>
           <ItemList items={d.waitingAi} />
         </Card>
       )}
 
       {d && d.worth.length > 0 && (
         <Card title={t('attention.worth')}>
-          <p className="mb-2 text-sm text-slate-600">{t('attention.worthHint')}</p>
+          <p className="text-[13px] text-muted">{t('attention.worthHint')}</p>
           <ItemList items={d.worth} />
         </Card>
       )}
 
       {!!summary?.missedOpen && (
-        <Notice>
-          {t('attention.missedLink', { n: summary.missedOpen })} <ButtonLink to="/missed" variant="ghost">{t('nav.missed')}</ButtonLink>
-        </Notice>
+        <p className="flex flex-wrap items-center gap-x-2 rounded-xl bg-info-tint px-3 py-2 text-sm">
+          {t('attention.missedLink', { n: summary.missedOpen })}
+          <Link to="/missed" className="font-semibold text-accent-deep underline">{t('nav.missed')}</Link>
+        </p>
       )}
     </div>
   );

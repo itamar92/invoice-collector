@@ -69,6 +69,21 @@ export const he = {
   // nav
   'nav.attention': 'דורש טיפול',
   'nav.invoices': 'כל החשבוניות',
+  'nav.dashboard': 'סיכום',
+
+  'dash.title': 'סיכום',
+  'dash.intro': 'מסמכים שתויקו ב-Dropbox, לפי תאריך המסמך.',
+  'dash.year': 'שנה',
+  'dash.filed': 'מסמכים שתויקו',
+  'dash.total': 'סכום כולל',
+  'dash.byCategory': 'לפי קטגוריה',
+  'dash.byMonth': 'לפי חודש',
+  'dash.noCategory': 'ללא קטגוריה',
+  'dash.other': 'אחר',
+  'dash.docs': '{n} מסמכים',
+  'dash.empty': 'עדיין לא תויקו מסמכים בשנה הזאת',
+  'dash.otherCurrency': '{n} מסמכים במטבע אחר נספרים, אבל לא נכללים בסכומים',
+
   'nav.backfill': 'ייבוא ראשון',
   'nav.vendors': 'ספקים',
   'nav.missed': 'פוספסו בתווית',

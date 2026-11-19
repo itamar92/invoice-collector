@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { AiSection, CategoriesSection, ConnectionsSection, LabelSection } from '../components/SettingsSections.js';
-import { Button, Card, ErrorText, Notice, useAction, useApp } from '../components/ui.js';
+import { Button, Card, ErrorText, Icon, Notice, useAction, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
+import { Brand } from '../Layout.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const STEPS: MessageKey[] = ['setup.s1', 'setup.s2', 'setup.s3', 'setup.s4', 'setup.s5'];
@@ -38,7 +39,7 @@ function StartBackfill({ onStarted }: { onStarted: () => void }) {
     <div className="space-y-3">
       <p className="text-sm">{t('start.intro')}</p>
       <Notice tone="ok">{t('start.noMorning')}</Notice>
-      <p className="text-sm text-slate-600">{t('start.cost')}</p>
+      <p className="text-sm text-muted">{t('start.cost')}</p>
       <Notice tone="warn">{t('start.n8n')}</Notice>
       {!connected && <Notice tone="warn">{t('backfill.notConnected')}</Notice>}
       {st.backfillError && <Notice tone="warn">{t('backfill.runError', { error: st.backfillError })}</Notice>}
@@ -80,36 +81,42 @@ export default function Setup() {
     <StartBackfill key="b" onStarted={() => { try { sessionStorage.removeItem(STEP_KEY); } catch { /* ignore */ } navigate('/backfill'); }} />,
   ][step];
 
+  const leg = (done: boolean) => <span aria-hidden="true" className={`mt-4 h-0.5 min-w-2 flex-1 rounded-full ${done ? 'bg-accent' : 'bg-line-strong'}`} />;
+
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-8">
-      <header>
-        <h1 className="text-2xl font-bold">{t('setup.title')}</h1>
-        <p className="text-sm text-slate-600">{t('setup.intro')}</p>
+      <header className="space-y-2">
+        <Brand />
+        <h1 className="display text-[26px] md:text-3xl">{t('setup.title')}</h1>
+        <p className="text-sm text-muted">{t('setup.intro')}</p>
       </header>
 
-      <ol className="grid grid-cols-5 gap-1 text-center text-xs">
+      <ol className="flex items-start">
         {STEPS.map((k, i) => (
-          <li key={k}>
-            <button type="button" onClick={() => setStep(i)}
-              className={`w-full rounded-lg px-1 py-2 ${i === step ? 'bg-teal-700 text-white' : i < step ? 'bg-teal-50 text-teal-900' : 'bg-white text-slate-500'} border border-slate-200`}>
-              <span className="block font-bold">{i + 1}</span>
-              <span className="hidden sm:block">{t(k)}</span>
+          <li key={k} className="contents">
+            {i > 0 && leg(i <= step)}
+            <button type="button" aria-current={i === step ? 'step' : undefined} aria-label={t(k)} onClick={() => setStep(i)}
+              className="flex w-10 flex-col items-center gap-1 sm:w-24">
+              <span className={`display grid size-8 place-items-center rounded-full text-[15px] transition-colors ${i === step ? 'bg-accent text-white' : i < step ? 'bg-accent-tint text-accent-deep' : 'bg-ground-deep text-muted'}`}>
+                {i < step ? <Icon name="check" className="size-4" /> : i + 1}
+              </span>
+              <span className={`hidden text-center text-xs leading-tight sm:block ${i === step ? 'font-semibold' : 'text-muted'}`}>{t(k)}</span>
             </button>
           </li>
         ))}
       </ol>
 
       {connected && (
-        <Notice tone="ok">
-          {t('setup.connectedToast', { name: connected === 'google' ? t('conn.gmail') : t('conn.dropbox') })}{' '}
-          <button type="button" className="underline" onClick={() => setParams({})}>✕</button>
-        </Notice>
+        <p className="flex items-center justify-between gap-2 rounded-xl bg-ok-tint px-3 py-1 text-sm">
+          {t('setup.connectedToast', { name: connected === 'google' ? t('conn.gmail') : t('conn.dropbox') })}
+          <button type="button" aria-label={t('common.cancel')} className="grid size-9 place-items-center" onClick={() => setParams({})}><Icon name="close" className="size-4" /></button>
+        </p>
       )}
 
       <Card title={`${t('setup.step', { n: step + 1 })} · ${t(STEPS[step])}`}>{body}</Card>
 
       <div className="flex justify-between">
-        <Button variant="secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>{t('common.back')}</Button>
+        <Button variant="secondary" className="bg-white shadow-soft" disabled={step === 0} onClick={() => setStep(step - 1)}>{t('common.back')}</Button>
         {step < STEPS.length - 1 && <Button onClick={() => setStep(step + 1)}>{t('common.next')}</Button>}
       </div>
     </div>
