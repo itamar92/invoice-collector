@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildFilename, buildFolder } from '../../server/core/naming.js';
 import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
-import type { Category, ExtractedFields, SecretKey, Settings } from '../api.js';
+import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings } from '../api.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
 import { Button, Check, ErrorText, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp } from './ui.js';
@@ -269,6 +269,37 @@ export function LabelSection() {
 }
 
 // ---------- 4. categories + templates ----------
+type ClassList = { state: 'off' } | { state: 'loading' } | { state: 'error' } | { state: 'ok'; items: MorningClassification[] };
+
+const classLabel = (c: MorningClassification) => (c.irsCode != null ? `${c.title} (${c.irsCode})` : c.title);
+
+/** Morning's expense categories for the picker; 'off' until Morning credentials are saved. */
+function useMorningClassifications(configured: boolean) {
+  const [list, setList] = useState<ClassList>({ state: configured ? 'loading' : 'off' });
+  const load = async () => {
+    if (!configured) { setList({ state: 'off' }); return; }
+    setList({ state: 'loading' });
+    try { setList({ state: 'ok', items: (await api.morningClassifications()).classifications }); } catch { setList({ state: 'error' }); }
+  };
+  useEffect(() => { void load(); }, [configured]);
+  return { list, reload: load };
+}
+
+/** A dropdown of Morning's categories when the list loaded; otherwise the free-text id field it replaces. */
+function ClassificationPicker({ value, list, onChange }: { value: string; list: ClassList; onChange: (v: string) => void }) {
+  if (list.state !== 'ok' || list.items.length === 0) {
+    return <input aria-label={t('cat.classification')} className={`${inputCls} ltr`} value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
+  const known = !value || list.items.some((c) => c.id === value);
+  return (
+    <select aria-label={t('cat.classification')} className={inputCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{t('cat.classificationNone')}</option>
+      {!known && <option value={value}>{t('cat.classificationUnknown', { id: value })}</option>}
+      {list.items.map((c) => <option key={c.id} value={c.id}>{classLabel(c)}</option>)}
+    </select>
+  );
+}
+
 export function CategoriesSection() {
   const { s, save } = useSettings();
   const st = s.settings;
@@ -279,6 +310,7 @@ export function CategoriesSection() {
   const [newName, setNewName] = useState('');
   const saving = useAction();
   const [saved, setSaved] = useState(false);
+  const morning = useMorningClassifications(s.secrets.morning_id && s.secrets.morning_secret);
 
   const draft: Settings = { ...st, categories: cats, storageRoot: root, folderTemplate: folderT, filenameTemplate: fileT };
   const example = useMemo(() => {
@@ -322,12 +354,20 @@ export function CategoriesSection() {
               <tr key={i}>
                 <td className={td}><input aria-label={t('cat.name')} className={inputCls} value={c.name} onChange={(e) => setCat(i, { name: e.target.value })} /></td>
                 <td className={`${td} text-center`}><input type="checkbox" className="size-5" checked={c.sendToAccounting} onChange={(e) => setCat(i, { sendToAccounting: e.target.checked })} aria-label={t('cat.send')} /></td>
-                <td className={td}><input aria-label={t('cat.classification')} className={inputCls} value={c.accountingClassification ?? ''} onChange={(e) => setCat(i, { accountingClassification: e.target.value })} /></td>
+                <td className={td}><ClassificationPicker value={c.accountingClassification ?? ''} list={morning.list} onChange={(v) => setCat(i, { accountingClassification: v })} /></td>
                 <td className={td}><Button variant="ghost" onClick={() => { setCats(cats.filter((_, j) => j !== i)); setSaved(false); }}>{t('cat.remove')}</Button></td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+        {morning.list.state === 'off' && <span>{t('cat.classificationsNeedMorning')}</span>}
+        {morning.list.state === 'loading' && <span>{t('cat.classificationsLoading')}</span>}
+        {morning.list.state === 'error' && <span className="rounded-lg bg-warn-tint px-2 py-1 text-ink">{t('cat.classificationsUnavailable')}</span>}
+        {morning.list.state !== 'off' && (
+          <Button variant="ghost" disabled={morning.list.state === 'loading'} onClick={() => void morning.reload()}>{t('cat.classificationsRefresh')}</Button>
+        )}
       </div>
       <div className="flex gap-2">
         <input aria-label={t('cat.newName')} className={inputCls} placeholder={t('cat.newName')} value={newName} onChange={(e) => setNewName(e.target.value)} />
