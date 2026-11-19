@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api.js';
 import type { RecipeVersion, Vendor, VendorStatus } from '../api.js';
 import {
-  Button, Card, Empty, ErrorText, fmtDateTime, inputCls, Loading, Notice, PageTitle, useAction, useApp, useLoad,
+  Avatar, Button, Card, Empty, ErrorText, fmtDateTime, hintCls, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -28,31 +28,31 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
 
   if (history.loading && !history.data) return <Loading />;
   return (
-    <div className="space-y-3 border-t border-slate-100 pt-3">
+    <div className="space-y-3 rounded-xl bg-ground p-3">
       {latest
         ? (
           <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" className="mt-1 h-5 w-5" checked={!!latest.recipe.aiAlways} disabled={act.busy} onChange={(e) => toggleAi(e.target.checked)} />
-            <span><span className="font-medium">{t('vendors.aiAlways')}</span><span className="block text-xs text-slate-500">{t('vendors.aiAlwaysHint')}</span></span>
+            <input type="checkbox" className="mt-0.5 size-5" checked={!!latest.recipe.aiAlways} disabled={act.busy} onChange={(e) => toggleAi(e.target.checked)} />
+            <span><span className="font-semibold">{t('vendors.aiAlways')}</span><span className="block text-xs text-muted">{t('vendors.aiAlwaysHint')}</span></span>
           </label>
         )
-        : <p className="text-sm text-slate-500">{t('vendors.noRecipe')}</p>}
+        : <p className="text-sm text-muted">{t('vendors.noRecipe')}</p>}
       <div>
-        <p className="mb-1 text-xs text-slate-500">{t('vendors.recipeHint')}</p>
-        <textarea className={`${inputCls} ltr h-64 font-mono text-xs`} spellCheck={false} value={value}
+        <p className={`mb-1 ${hintCls}`}>{t('vendors.recipeHint')}</p>
+        <textarea aria-label={t('vendors.recipeHint')} className={`${inputCls} ltr h-64 font-mono text-xs`} spellCheck={false} value={value}
           onChange={(e) => { setText(e.target.value); setSaved(false); }} />
       </div>
       <div className="flex items-center gap-2">
         <Button disabled={act.busy || !value.trim() || text === null} onClick={save}>{t('vendors.saveRecipe')}</Button>
-        {saved && <span className="text-sm text-green-700">{t('common.saved')}</span>}
+        <Saved show={saved} />
       </div>
       <ErrorText>{act.error}</ErrorText>
       {versions.length > 0 && (
         <div>
-          <h4 className="mb-1 text-sm font-medium">{t('vendors.history')}</h4>
-          <ul className="divide-y divide-slate-100 text-sm">
+          <h4 className="text-[13px] font-semibold">{t('vendors.history')}</h4>
+          <ul className="text-sm">
             {versions.map((v) => (
-              <li key={v.version} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+              <li key={v.version} className={`flex flex-wrap items-center justify-between gap-2 py-1 ${rowCls}`}>
                 <span>{t('vendors.version', { n: v.version })} · {t(`vendors.source.${v.source}` as MessageKey)} · {fmtDateTime(v.createdAt)}</span>
                 <Button variant="ghost" onClick={() => { setText(JSON.stringify(v.recipe, null, 2)); setSaved(false); }}>{t('vendors.load')}</Button>
               </li>
@@ -78,31 +78,34 @@ function VendorRow({ vendor, categories, onChange }: { vendor: Vendor; categorie
   });
 
   return (
-    <li className="py-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-40">
-          <div className="font-medium">{vendor.displayName}</div>
-          <bdi className="ltr text-xs text-slate-500">{vendor.key}</bdi>
+    <li className={`py-3 ${rowCls}`}>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-40 items-center gap-3">
+          <Avatar name={vendor.displayName} />
+          <div>
+            <div className="font-semibold">{vendor.displayName}</div>
+            <bdi className="ltr block font-mono text-xs text-muted">{vendor.key}</bdi>
+          </div>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="grid w-full grid-cols-2 items-end gap-2 sm:w-auto sm:grid-cols-[9rem_11rem_auto]">
           <label className="text-xs">
-            <span className="mb-0.5 block text-slate-500">{t('vendors.status')}</span>
-            <select className={`${inputCls} w-36`} value={vendor.status} disabled={act.busy} onChange={(e) => update({ status: e.target.value as VendorStatus })}>
+            <span className="mb-0.5 block font-semibold text-muted">{t('vendors.status')}</span>
+            <select className={inputCls} value={vendor.status} disabled={act.busy} onChange={(e) => update({ status: e.target.value as VendorStatus })}>
               {STATUSES.map((s) => <option key={s} value={s}>{t(`vendorStatus.${s}` as MessageKey)}</option>)}
             </select>
           </label>
           <label className="text-xs">
-            <span className="mb-0.5 block text-slate-500">{t('vendors.defaultCategory')}</span>
-            <select className={`${inputCls} w-44`} value={vendor.defaultCategory ?? ''} disabled={act.busy}
+            <span className="mb-0.5 block font-semibold text-muted">{t('vendors.defaultCategory')}</span>
+            <select className={inputCls} value={vendor.defaultCategory ?? ''} disabled={act.busy}
               onChange={(e) => update({ defaultCategory: e.target.value || null })}>
               <option value="">{t('field.choose')}</option>
               {[...new Set([...categories, ...(vendor.defaultCategory ? [vendor.defaultCategory] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-          <Button variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>{t('vendors.edit')} {open ? '▴' : '▾'}</Button>
+          <Button variant="ghost" className="col-span-2 justify-self-start sm:col-span-1" aria-expanded={open} onClick={() => setOpen(!open)}>{t('vendors.edit')}<Icon name={open ? 'up' : 'down'} className="size-4" /></Button>
         </div>
       </div>
-      {pending && <p className="mt-1 text-xs text-amber-800">{t('vendors.pending')}</p>}
+      {pending && <p className="mt-2 rounded-lg bg-warn-tint px-2 py-1 text-xs">{t('vendors.pending')}</p>}
       <ErrorText>{act.error}</ErrorText>
       {open && <div className="mt-3"><RecipeEditor vendor={vendor} /></div>}
     </li>
@@ -118,10 +121,14 @@ export default function Vendors() {
   return (
     <div className="space-y-4">
       <PageTitle>{t('vendors.title')}</PageTitle>
-      <Notice>{t('vendorStatus.businessHint')} · {t('vendorStatus.personalHint')} · {t('vendorStatus.ignoredHint')}</Notice>
+      <dl className="grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-3">
+        {(['business', 'personal', 'ignored'] as const).map((s) => (
+          <div key={s}><dt className="inline font-semibold">{t(`vendorStatus.${s}` as MessageKey)}: </dt><dd className="inline text-muted">{t(`vendorStatus.${s}Hint` as MessageKey)}</dd></div>
+        ))}
+      </dl>
       <Card>
         {list.loading && !list.data ? <Loading /> : list.error ? <ErrorText>{list.error}</ErrorText> : !list.data?.length ? <Empty>{t('vendors.empty')}</Empty> : (
-          <ul className="divide-y divide-slate-100">
+          <ul>
             {list.data.map((v) => <VendorRow key={v.key} vendor={v} categories={categories} onChange={replace} />)}
           </ul>
         )}

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { api, ApiError } from '../api.js';
 import { Button, ErrorText, Field, inputCls } from '../components/ui.js';
 import { t } from '../i18n/he.js';
+import { Brand } from '../Layout.js';
 
 export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [password, setPassword] = useState('');
@@ -23,8 +24,8 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-bold">{t('app.name')}</h1>
+      <form onSubmit={submit} className="panel w-full max-w-sm space-y-4 !rounded-3xl !p-6">
+        <h1><Brand /></h1>
         <Field label={t('login.password')}>
           <input type="password" autoFocus autoComplete="current-password" className={inputCls}
             value={password} onChange={(e) => setPassword(e.target.value)} />

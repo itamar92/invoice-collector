@@ -22,6 +22,7 @@ import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
 import { detectMorningModes } from './destinations/morning.js';
 import { secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
+import { stats } from './stats.js';
 import { sanitizeError, summary, worthSince } from './summary.js';
 import type { SecretKey } from './secrets.js';
 import { getSettings, updateSettings } from './settings.js';
@@ -82,6 +83,8 @@ const ListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const StatsQuery = z.object({ year: z.coerce.number().int().min(2000).max(2100).optional() });
 
 const Ids = z.object({ ids: z.array(z.string().min(1)).max(1000) }).strict();
 
@@ -144,6 +147,11 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.use(requireUser);
 
   r.get('/summary', wrap((_req, res) => { res.json(summary(clock())); }));
+
+  r.get('/stats', wrap((req, res) => {
+    const q = parse(StatsQuery, req.query);
+    res.json(stats(q.year ?? clock().getFullYear()));
+  }));
 
   r.post('/worker/run', wrap(async (_req, res) => {
     if (!ctx.runTick) throw new HttpError(503, 'worker_unavailable');

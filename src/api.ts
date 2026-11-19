@@ -1,9 +1,10 @@
 import type { ExtractedFields, ItemState, Reason } from '../server/core/types.js';
 import type { Category, Settings } from '../server/settings.js';
 import type { SecretKey } from '../server/secrets.js';
+import type { Stats } from '../server/stats.js';
 import { tDyn } from './i18n/he.js';
 
-export type { Category, ExtractedFields, ItemState, Reason, SecretKey, Settings };
+export type { Category, ExtractedFields, ItemState, Reason, SecretKey, Settings, Stats };
 
 export interface Summary {
   attention: number; awaitingVendor: number; awaitingBackfillApproval: number; waitingAi: number; worthALook: number; missedOpen: number;
@@ -82,6 +83,7 @@ export const api = {
   logout: () => send<void>('POST', '/api/logout'),
   me: () => get<{ ok: true }>('/api/me'),
   summary: () => get<Summary>('/api/summary'),
+  stats: (year?: number) => get<Stats>(`/api/stats${year ? `?year=${year}` : ''}`),
   runWorker: () => send<Summary>('POST', '/api/worker/run'),
 
   items: (q: { state?: ItemState; q?: string; worth?: boolean; limit?: number; offset?: number } = {}) => {

@@ -4,7 +4,7 @@ import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
 import type { Category, ExtractedFields, SecretKey, Settings } from '../api.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
-import { Button, Check, ErrorText, Field, inputCls, Notice, SecretInput, useAction, useApp } from './ui.js';
+import { Button, Check, ErrorText, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp } from './ui.js';
 
 /** Shared by Setup (one step each) and Settings (all of them, editable later). */
 
@@ -24,10 +24,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function ConnectRow({ name, hint, ok, onConnect }: { name: string; hint: string; ok: boolean; onConnect: () => Promise<void> }) {
   const a = useAction();
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 py-3">
-      <div>
-        <div className="flex items-center gap-2 font-medium">{name} <Check ok={ok} labels={[t('common.connected'), t('common.notConnected')]} /></div>
-        <p className="text-xs text-slate-500">{hint}</p>
+    <div className={`flex flex-wrap items-center justify-between gap-2 py-3 ${rowCls}`}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-3 text-base font-semibold">{name} <Check ok={ok} labels={[t('common.connected'), t('common.notConnected')]} /></div>
+        <p className={hintCls}>{hint}</p>
         <ErrorText>{a.error}</ErrorText>
       </div>
       <Button variant={ok ? 'secondary' : 'primary'} disabled={a.busy} onClick={() => a.run(onConnect)}>
@@ -68,8 +68,8 @@ export function ConnectionsSection() {
         onConnect={() => startOAuth('/api/oauth/dropbox/start')} />
 
       <div className="space-y-3 py-3">
-        <div className="font-medium">{t('conn.morning')}</div>
-        <p className="text-xs text-slate-500">{t('connect.morningHint')}</p>
+        <div className="text-base font-semibold">{t('conn.morning')}</div>
+        <p className={hintCls}>{t('connect.morningHint')}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <SecretInput label={t('connect.morningId')} configured={secrets.morning_id} onSave={(v) => saveSecret('morning_id', v)} />
           <SecretInput label={t('connect.morningSecret')} configured={secrets.morning_secret} onSave={(v) => saveSecret('morning_secret', v)} />
@@ -80,22 +80,22 @@ export function ConnectionsSection() {
         <ErrorText>{detect.error}</ErrorText>
 
         <fieldset className="space-y-2">
-          <legend className="mb-1 text-sm font-medium text-slate-700">{t('connect.modes')}</legend>
+          <legend className="mb-1 text-[13px] font-semibold">{t('connect.modes')}</legend>
           {MODES.map((m) => (
-            <label key={m} className={`flex items-start gap-2 text-sm ${available(m) ? '' : 'text-slate-400'}`}>
-              <input type="radio" name="morning-mode" className="mt-1" checked={mode === m} disabled={!available(m) || saving.busy}
+            <label key={m} className={`flex min-h-8 items-start gap-2 text-sm ${available(m) ? '' : 'text-idle'}`}>
+              <input type="radio" name="morning-mode" className="mt-0.5 size-4" checked={mode === m} disabled={!available(m) || saving.busy}
                 onChange={() => choose(m)} />
               <span>{t(`connect.mode.${m}` as MessageKey)}{!available(m) && ` — ${t('connect.modeUnavailable')}`}</span>
             </label>
           ))}
         </fieldset>
 
-        {mode && <p className="text-sm font-medium">{t('connect.chosen', { mode: t(`connect.mode.${mode}` as MessageKey) })}</p>}
+        {mode && <p className="text-sm font-semibold">{t('connect.chosen', { mode: t(`connect.mode.${mode}` as MessageKey) })}</p>}
         {(mode === 'api_fields' || mode === 'api_file') && <Notice tone="warn">{t('connect.detectedNote')}</Notice>}
         {justDetected && onlyEmail && <Notice tone="warn">{t('connect.onlyEmail')}</Notice>}
 
         {mode === 'email' && (
-          <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+          <div className="space-y-2 rounded-xl bg-ground p-3">
             <Field label={t('connect.inboxEmail')}>
               <div className="flex gap-2">
                 <input type="email" className={`${inputCls} ltr`} value={inbox} onChange={(e) => setInbox(e.target.value)} />
@@ -103,7 +103,7 @@ export function ConnectionsSection() {
               </div>
             </Field>
             {hasSend
-              ? <p className="text-sm text-green-700">✓ {t('connect.hasSend')}</p>
+              ? <p className="flex items-center gap-1 text-sm font-medium"><Icon name="check" className="size-4 text-accent-deep" />{t('connect.hasSend')}</p>
               : (
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span>{t('connect.needsSend')}</span>
@@ -113,7 +113,7 @@ export function ConnectionsSection() {
           </div>
         )}
         <ErrorText>{saving.error}</ErrorText>
-        <p className="text-xs text-slate-500">{t('connect.neverApproved')}</p>
+        <p className={hintCls}>{t('connect.neverApproved')}</p>
       </div>
     </div>
   );
@@ -153,12 +153,12 @@ export function AiSection() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-600">{t('ai.intro')}</p>
+      <p className="text-sm text-muted">{t('ai.intro')}</p>
       <fieldset className="grid gap-2 sm:grid-cols-2">
-        <legend className="mb-1 text-sm font-medium text-slate-700">{t('ai.mode')}</legend>
+        <legend className="mb-1 text-[13px] font-semibold">{t('ai.mode')}</legend>
         {AI_MODES.map((m) => (
-          <label key={m} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${mode === m ? 'border-teal-600 bg-teal-50' : 'border-slate-200'}`}>
-            <input type="radio" name="ai-mode" checked={mode === m} onChange={() => { setMode(m); setSaved(false); }} />
+          <label key={m} className={`flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm ${mode === m ? 'border-accent bg-accent-tint font-semibold' : 'border-line-strong'}`}>
+            <input type="radio" name="ai-mode" className="size-4" checked={mode === m} onChange={() => { setMode(m); setSaved(false); }} />
             {t(`ai.mode.${m}` as MessageKey)}
           </label>
         ))}
@@ -177,7 +177,7 @@ export function AiSection() {
           </div>
           <Field label={t('ai.sshHostKey')}><input className={`${inputCls} ltr font-mono`} value={ssh.hostKeySha256} onChange={(e) => setSsh({ ...ssh, hostKeySha256: e.target.value })} placeholder="SHA256:…" /></Field>
           <SecretInput label={t('ai.sshKey')} configured={s.secrets.ssh_private_key} onSave={(v) => saveSecret('ssh_private_key', v)} multiline />
-          <p className="text-xs text-slate-500">{t('ai.sshHint')}</p>
+          <p className={hintCls}>{t('ai.sshHint')}</p>
         </div>
       )}
       {mode !== 'none' && (
@@ -189,7 +189,7 @@ export function AiSection() {
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={!dirty || saving.busy || (mode === 'ssh' && !sshValid)} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         {mode !== 'none' && <Button variant="secondary" disabled={dirty || test.busy} onClick={doTest}>{test.busy ? t('ai.testing') : t('ai.test')}</Button>}
-        {saved && !dirty && <span className="text-sm text-green-700">{t('common.saved')}</span>}
+        <Saved show={saved && !dirty} />
       </div>
       {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.text}</Notice>}
       <ErrorText>{saving.error ?? test.error}</ErrorText>
@@ -220,20 +220,20 @@ export function LabelSection() {
 
   return (
     <div className="space-y-4">
-      <Notice>{t('label.why')}</Notice>
+      <p className="text-sm text-muted">{t('label.why')}</p>
       <div>
-        <p className="mb-2 text-sm font-medium">{t('label.howTitle')}</p>
-        <ol className="list-decimal space-y-1 ps-6 text-sm text-slate-700">
+        <p className="mb-1 text-[13px] font-semibold">{t('label.howTitle')}</p>
+        <ol className="list-decimal space-y-0.5 ps-6 text-sm marker:font-semibold marker:text-accent">
           {HOW.map((k) => <li key={k}>{t(k)}</li>)}
         </ol>
-        <a href={FILTERS_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-medium text-teal-800 underline">
-          {t('label.link')} ↗
+        <a href={FILTERS_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-accent underline">
+          {t('label.link')}<Icon name="out" className="size-4" />
         </a>
       </div>
 
       <fieldset className="space-y-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="radio" name="label-mode" checked={useLabel} onChange={() => setUseLabel(true)} /> {t('label.useLabel')}
+        <label className="flex min-h-8 items-center gap-2 text-sm font-semibold">
+          <input type="radio" name="label-mode" className="size-4" checked={useLabel} onChange={() => setUseLabel(true)} /> {t('label.useLabel')}
         </label>
         {useLabel && (
           <div className="space-y-2 ps-6">
@@ -245,23 +245,23 @@ export function LabelSection() {
                 </select>
               </Field>
             )}
-            {listError && <p className="text-xs text-amber-800">{t('label.listUnavailable')}</p>}
+            {listError && <p className="rounded-lg bg-warn-tint px-2 py-1 text-xs">{t('label.listUnavailable')}</p>}
             <Field label={t('label.typeIt')}>
               <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
             </Field>
             <Button variant="ghost" onClick={() => void load()}>{t('label.refresh')}</Button>
-            <p className="text-xs text-slate-500">{t('label.missedNote')}</p>
+            <p className={hintCls}>{t('label.missedNote')}</p>
           </div>
         )}
-        <label className="flex items-center gap-2 text-sm">
-          <input type="radio" name="label-mode" checked={!useLabel} onChange={() => setUseLabel(false)} /> {t('label.scanAll')}
+        <label className="flex min-h-8 items-center gap-2 text-sm font-semibold">
+          <input type="radio" name="label-mode" className="size-4" checked={!useLabel} onChange={() => setUseLabel(false)} /> {t('label.scanAll')}
         </label>
-        {!useLabel && <p className="ps-6 text-xs text-amber-800">{t('label.scanAllHint')}</p>}
+        {!useLabel && <p className="ms-6 rounded-lg bg-warn-tint px-2 py-1 text-xs">{t('label.scanAllHint')}</p>}
       </fieldset>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={!canSave || saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
-        <span className="text-sm text-slate-600">{current ? t('label.current', { label: current }) : t('label.currentAll')}</span>
+        <span className="text-sm text-muted">{current ? t('label.current', { label: current }) : t('label.currentAll')}</span>
       </div>
       <ErrorText>{saving.error}</ErrorText>
     </div>
@@ -308,29 +308,29 @@ export function CategoriesSection() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-600">{t('cat.intro')}</p>
+      <p className="text-sm text-muted">{t('cat.intro')}</p>
       <div className="-mx-4 overflow-x-auto px-4">
         <table className="w-full min-w-[32rem] text-sm">
           <thead><tr>
-            <th className="px-2 py-1 text-start font-medium text-slate-500">{t('cat.name')}</th>
-            <th className="px-2 py-1 text-start font-medium text-slate-500">{t('cat.send')}</th>
-            <th className="px-2 py-1 text-start font-medium text-slate-500">{t('cat.classification')}</th>
-            <th />
+            <th className={th}>{t('cat.name')}</th>
+            <th className={`${th} text-center`}>{t('cat.send')}</th>
+            <th className={th}>{t('cat.classification')}</th>
+            <th className={th} />
           </tr></thead>
           <tbody>
             {cats.map((c, i) => (
-              <tr key={i} className="border-t border-slate-100">
-                <td className="px-2 py-1"><input className={inputCls} value={c.name} onChange={(e) => setCat(i, { name: e.target.value })} /></td>
-                <td className="px-2 py-1 text-center"><input type="checkbox" className="h-5 w-5" checked={c.sendToAccounting} onChange={(e) => setCat(i, { sendToAccounting: e.target.checked })} aria-label={t('cat.send')} /></td>
-                <td className="px-2 py-1"><input className={inputCls} value={c.accountingClassification ?? ''} onChange={(e) => setCat(i, { accountingClassification: e.target.value })} /></td>
-                <td className="px-2 py-1"><Button variant="ghost" onClick={() => { setCats(cats.filter((_, j) => j !== i)); setSaved(false); }}>{t('cat.remove')}</Button></td>
+              <tr key={i}>
+                <td className={td}><input aria-label={t('cat.name')} className={inputCls} value={c.name} onChange={(e) => setCat(i, { name: e.target.value })} /></td>
+                <td className={`${td} text-center`}><input type="checkbox" className="size-5" checked={c.sendToAccounting} onChange={(e) => setCat(i, { sendToAccounting: e.target.checked })} aria-label={t('cat.send')} /></td>
+                <td className={td}><input aria-label={t('cat.classification')} className={inputCls} value={c.accountingClassification ?? ''} onChange={(e) => setCat(i, { accountingClassification: e.target.value })} /></td>
+                <td className={td}><Button variant="ghost" onClick={() => { setCats(cats.filter((_, j) => j !== i)); setSaved(false); }}>{t('cat.remove')}</Button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="flex gap-2">
-        <input className={inputCls} placeholder={t('cat.newName')} value={newName} onChange={(e) => setNewName(e.target.value)} />
+        <input aria-label={t('cat.newName')} className={inputCls} placeholder={t('cat.newName')} value={newName} onChange={(e) => setNewName(e.target.value)} />
         <Button variant="secondary" disabled={!newName.trim()} onClick={add}>{t('cat.add')}</Button>
       </div>
 
@@ -344,14 +344,14 @@ export function CategoriesSection() {
         <Field label={t('cat.filenameTemplate')} hint={t('cat.placeholders')}>
           <input className={`${inputCls} ltr font-mono`} value={fileT} onChange={(e) => { setFileT(e.target.value); setSaved(false); }} />
         </Field>
-        <div className="rounded-lg bg-slate-50 p-3 text-sm">
-          <span className="font-medium">{t('cat.example')}</span>{' '}
-          {example ? <bdi className="ltr inline-block break-all font-mono text-xs">{example}</bdi> : <span className="text-red-700">{t('cat.exampleError')}</span>}
+        <div className="rounded-xl bg-ok-tint p-3 text-sm">
+          <span className="font-semibold">{t('cat.example')}</span>{' '}
+          {example ? <bdi className="ltr inline-block break-all font-mono text-xs">{example}</bdi> : <span className="font-semibold text-alert-deep">{t('cat.exampleError')}</span>}
         </div>
       </div>
       <div className="flex items-center gap-2">
         <Button disabled={!valid || saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
-        {saved && <span className="text-sm text-green-700">{t('common.saved')}</span>}
+        <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
     </div>
@@ -381,7 +381,7 @@ export function GeneralSection() {
       </div>
       <div className="flex items-center gap-2">
         <Button disabled={saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
-        {saved && <span className="text-sm text-green-700">{t('common.saved')}</span>}
+        <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
     </div>

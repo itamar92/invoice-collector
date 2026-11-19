@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api, GMAIL_SEND_SCOPE } from './api.js';
 import type { SettingsResponse } from './api.js';
-import { Button, CountBadge, ErrorText, fmtDateTime, useAction, useApp } from './components/ui.js';
+import { Button, CountBadge, ErrorText, fmtDateTime, Icon, useAction, useApp } from './components/ui.js';
+import type { IconName } from './components/ui.js';
 import { t } from './i18n/he.js';
 import type { MessageKey } from './i18n/he.js';
 
@@ -19,85 +20,138 @@ export function connectionProblems(s: SettingsResponse): string[] {
   return out;
 }
 
-const NAV: { to: string; key: MessageKey; count?: 'attention' | 'missedOpen' }[] = [
-  { to: '/attention', key: 'nav.attention', count: 'attention' },
-  { to: '/invoices', key: 'nav.invoices' },
-  { to: '/backfill', key: 'nav.backfill' },
-  { to: '/vendors', key: 'nav.vendors' },
-  { to: '/missed', key: 'nav.missed', count: 'missedOpen' },
-  { to: '/settings', key: 'nav.settings' },
+type NavItem = { to: string; key: MessageKey; icon: IconName; count?: 'attention' | 'missedOpen' };
+const NAV: NavItem[] = [
+  { to: '/attention', key: 'nav.attention', icon: 'inbox', count: 'attention' },
+  { to: '/invoices', key: 'nav.invoices', icon: 'list' },
+  { to: '/dashboard', key: 'nav.dashboard', icon: 'chart' },
+  { to: '/missed', key: 'nav.missed', icon: 'mail', count: 'missedOpen' },
+  { to: '/vendors', key: 'nav.vendors', icon: 'vendor' },
+  { to: '/backfill', key: 'nav.backfill', icon: 'import' },
+  { to: '/settings', key: 'nav.settings', icon: 'settings' },
 ];
+/** Phone: the first four are tabs; the rest live behind the menu tab. */
+const TABS = NAV.slice(0, 4);
+const MORE = NAV.slice(4);
+
+export function Brand({ className = '' }: { className?: string }) {
+  return (
+    <span className={`flex items-center gap-2 ${className}`}>
+      <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent text-white"><Icon name="list" /></span>
+      <span className="display text-xl">{t('app.name')}</span>
+    </span>
+  );
+}
 
 export default function Layout({ onLogout }: { onLogout: () => void }) {
   const { summary, settings, refreshSummary } = useApp();
   const [open, setOpen] = useState(false);
+  const loc = useLocation();
   const run = useAction();
   const problems = settings ? connectionProblems(settings) : [];
   const active = !!settings?.settings.setupComplete && !!settings?.settings.backfillDone;
+  const inMore = MORE.some((n) => loc.pathname.startsWith(n.to));
+
+  useEffect(() => { setOpen(false); }, [loc.pathname]);
 
   const runNow = () => run.run(async () => { await api.runWorker(); await refreshSummary(); });
   const logout = async () => { try { await api.logout(); } finally { onLogout(); } };
+  const lastRun = summary?.lastTickAt ? t('worker.lastRun', { when: fmtDateTime(summary.lastTickAt) }) : t('worker.neverRan');
+  const count = (n: NavItem) => (n.count && summary ? summary[n.count] : 0);
 
-  const nav = (
-    <nav className="flex flex-col gap-1">
-      {NAV.map((n) => (
-        <NavLink key={n.to} to={n.to} onClick={() => setOpen(false)}
-          className={({ isActive }) => `flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium ${isActive ? 'bg-teal-50 text-teal-900' : 'text-slate-700 hover:bg-slate-100'}`}>
-          <span>{t(n.key)}</span>
-          {n.count && summary && <CountBadge n={summary[n.count]} tone={n.count === 'attention' ? 'red' : 'slate'} />}
-        </NavLink>
-      ))}
-    </nav>
+  const tab = (on: boolean, icon: IconName, label: string, n = 0, tone: 'red' | 'slate' = 'red') => (
+    <>
+      <span className={`relative grid h-7 w-14 place-items-center rounded-full transition-colors ${on ? 'bg-accent-tint text-accent-deep' : 'text-muted'}`}>
+        <Icon name={icon} />
+        {n > 0 && <span className="absolute -top-1.5 start-9"><CountBadge n={n} tone={tone} /></span>}
+      </span>
+      <span className={`text-[11px] leading-tight ${on ? 'font-semibold text-accent-deep' : 'font-medium text-muted'}`}>{label}</span>
+    </>
   );
-
-  const status = (
-    <div className="space-y-2 border-t border-slate-200 pt-3 text-xs text-slate-500">
-      <p>{summary?.lastTickAt ? t('worker.lastRun', { when: fmtDateTime(summary.lastTickAt) }) : t('worker.neverRan')}</p>
-      {!active && <p>{t('worker.notActive')}</p>}
-      <Button variant="secondary" className="w-full" disabled={run.busy} onClick={runNow}>
-        {run.busy ? t('worker.running') : t('worker.runNow')}
-      </Button>
-      <ErrorText>{run.error}</ErrorText>
-      <button type="button" onClick={() => void logout()} className="text-slate-500 underline hover:text-slate-800">{t('logout')}</button>
-    </div>
-  );
+  const tabCls = 'flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-center';
 
   return (
     <div className="min-h-dvh md:flex">
-      {/* phone: top bar + collapsible menu */}
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2 md:hidden">
-        <Link to="/attention" className="font-bold">{t('app.name')}</Link>
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
-          className="flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm">
-          {t('nav.menu')}
-          {summary && <CountBadge n={summary.attention} />}
-        </button>
+      {/* phone: top bar with the worker status */}
+      <header className="sticky top-0 z-20 border-b border-line bg-ground md:hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-2">
+          <Link to="/attention" className="min-w-0">
+            <Brand />
+          </Link>
+          <Button variant="secondary" className="shrink-0 bg-white shadow-soft" disabled={run.busy} onClick={runNow}>
+            {run.busy ? t('worker.running') : t('worker.runNow')}
+          </Button>
+        </div>
       </header>
-      {open && <div className="space-y-3 border-b border-slate-200 bg-white p-4 md:hidden">{nav}{status}</div>}
 
-      {/* desktop: sidebar on the start (right) side */}
-      <aside className="hidden w-60 shrink-0 flex-col gap-4 border-e border-slate-200 bg-white p-4 md:flex md:min-h-dvh">
-        <Link to="/attention" className="px-3 text-lg font-bold">{t('app.name')}</Link>
-        {nav}
-        <div className="mt-auto">{status}</div>
+      {/* desktop: rail on the start (right) side */}
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-e border-line p-4 md:flex">
+        <Link to="/attention" className="px-2 pb-5 pt-2"><Brand /></Link>
+        <nav className="flex flex-col gap-1">
+          {NAV.map((n) => (
+            <NavLink key={n.to} to={n.to}
+              className={({ isActive }) => `flex min-h-10 items-center gap-2.5 rounded-xl px-3 text-[15px] transition-colors ${isActive ? 'bg-white font-semibold text-accent-deep shadow-soft' : 'font-medium hover:bg-ground-deep'}`}>
+              <Icon name={n.icon} />
+              <span className="flex-1">{t(n.key)}</span>
+              <CountBadge n={count(n)} tone={n.count === 'attention' ? 'red' : 'slate'} />
+            </NavLink>
+          ))}
+        </nav>
+        <div className="mt-auto space-y-2 px-2 text-xs text-muted">
+          <p>{lastRun}</p>
+          {!active && <p>{t('worker.notActive')}</p>}
+          <Button variant="secondary" className="w-full bg-white shadow-soft" disabled={run.busy} onClick={runNow}>
+            {run.busy ? t('worker.running') : t('worker.runNow')}
+          </Button>
+          <button type="button" onClick={() => void logout()} className="min-h-8 font-medium text-ink underline">{t('logout')}</button>
+        </div>
       </aside>
 
-      <main className="min-w-0 flex-1 p-4 md:p-6">
-        <div className="mx-auto max-w-5xl space-y-3">
-          {summary?.lastTickError && (
-            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-              {t('banner.tickError', { error: summary.lastTickError })}
-            </div>
-          )}
+      <main className="min-w-0 flex-1 px-4 pb-28 pt-4 md:p-8">
+        <div className="mx-auto max-w-4xl space-y-4">
+          <p className="text-xs text-muted md:hidden">{lastRun}</p>
+          <ErrorText>{run.error}</ErrorText>
+          {summary?.lastTickError && <ErrorText>{t('banner.tickError', { error: summary.lastTickError })}</ErrorText>}
           {problems.length > 0 && (
-            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warn-tint px-3 py-2 text-sm">
               <span>{t('banner.disconnected', { names: problems.join(', ') })}</span>
-              <Link to="/settings" className="font-medium underline">{t('banner.fix')}</Link>
+              <Link to="/settings" className="font-semibold text-accent-deep underline">{t('banner.fix')}</Link>
             </div>
           )}
           <Outlet />
         </div>
       </main>
+
+      {/* phone: the rest of the navigation, as a sheet above the tab bar */}
+      {open && (
+        <>
+          <button type="button" aria-label={t('common.cancel')} className="fixed inset-0 z-20 bg-ink/30 md:hidden" onClick={() => setOpen(false)} />
+          <div id="more-menu" className="fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 rounded-2xl bg-white p-2 shadow-soft md:hidden">
+            {MORE.map((n) => (
+              <NavLink key={n.to} to={n.to}
+                className={({ isActive }) => `flex min-h-12 items-center gap-3 rounded-xl px-3 font-medium ${isActive ? 'bg-accent-tint text-accent-deep' : ''}`}>
+                <Icon name={n.icon} />{t(n.key)}
+              </NavLink>
+            ))}
+            <button type="button" onClick={() => void logout()} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 font-medium">
+              <Icon name="out" />{t('logout')}
+            </button>
+            {!active && <p className="px-3 py-2 text-xs text-muted">{t('worker.notActive')}</p>}
+          </div>
+        </>
+      )}
+
+      {/* phone: bottom tab bar, within thumb reach */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 rounded-t-3xl bg-white px-1 pb-[env(safe-area-inset-bottom)] shadow-bar md:hidden">
+        {TABS.map((n) => (
+          <NavLink key={n.to} to={n.to} className={tabCls}>
+            {({ isActive }) => tab(isActive && !open, n.icon, t(n.key), count(n), n.count === 'attention' ? 'red' : 'slate')}
+          </NavLink>
+        ))}
+        <button type="button" aria-expanded={open} aria-controls="more-menu" onClick={() => setOpen(!open)} className={tabCls}>
+          {tab(open || inMore, open ? 'close' : 'menu', t('nav.menu'))}
+        </button>
+      </nav>
     </div>
   );
 }

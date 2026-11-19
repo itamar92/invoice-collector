@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import type { BackfillRow } from '../api.js';
 import { VendorDecisions } from './Attention.js';
 import {
-  Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, Loading, Notice, PageTitle, StateBadge, TableWrap, td, th,
+  Button, Empty, ErrorText, Flag, fmtDate, fmtDateTime, fmtMoney, Loading, Notice, PageTitle, rowCls, StateBadge,
   useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
@@ -56,6 +56,8 @@ export default function Backfill() {
 
   const notConnected = list.code === 'not_connected';
 
+  const pickAll = () => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.id)));
+
   return (
     <div className="space-y-4">
       <PageTitle actions={!done && <Button variant="secondary" disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}>
@@ -63,15 +65,15 @@ export default function Backfill() {
       </PageTitle>
       {finished && <Notice tone="ok">{t('backfill.finished')}</Notice>}
       {done && !finished && <Notice>{t('backfill.done')}</Notice>}
-      <Notice>{t('backfill.intro')}</Notice>
+      <p className="text-sm text-muted">{t('backfill.intro')}</p>
       {running && (
         <Notice>
-          <span className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-700 border-t-transparent align-middle" />
+          <span className="me-2 inline-block size-3 animate-spin rounded-full border-2 border-info border-t-transparent align-middle" />
           {t('backfill.running')}{status?.startedAt && ` · ${t('backfill.startedAt', { when: fmtDateTime(status.startedAt) })}`}
         </Notice>
       )}
       {!running && status?.error && !done && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-warn-tint px-3 py-2 text-sm">
           <span>{status.error === 'interrupted' ? t('backfill.interrupted') : t('backfill.runError', { error: status.error })}</span>
           <Button variant="secondary" disabled={act.busy} onClick={restart}>{t('backfill.restart')}</Button>
         </div>
@@ -85,33 +87,26 @@ export default function Backfill() {
 
       <VendorDecisions onDecided={() => void list.reload()} />
 
-      <Card actions={approvable.length > 0 && (
-        <>
-          <Button variant="secondary" onClick={() => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.id)))}>{t('backfill.selectAll')}</Button>
-          <Button disabled={!chosen.length || act.busy} onClick={approve}>{t('backfill.approve', { n: chosen.length })}</Button>
-          <Button variant="danger" disabled={!chosen.length || act.busy} onClick={skip}>{t('backfill.skip', { n: chosen.length })}</Button>
-        </>
-      )}>
+      <section className="panel">
+        {/* Bulk actions stay in reach while the list scrolls. */}
+        <div className={`sticky top-14 z-10 flex flex-wrap items-center gap-2 bg-white md:top-0 ${approvable.length > 0 ? 'min-h-12 border-b border-line py-1.5' : ''}`}>
+          {approvable.length > 0 && (
+            <>
+              <label className="flex min-h-10 items-center gap-2 text-sm font-semibold">
+                <input type="checkbox" className="size-5" checked={allPicked} onChange={pickAll} />{t('backfill.selectAll')}
+              </label>
+              <Button className="ms-auto" disabled={!chosen.length || act.busy} onClick={approve}>{t('backfill.approve', { n: chosen.length })}</Button>
+              <Button variant="danger" className="ms-2" disabled={!chosen.length || act.busy} onClick={skip}>{t('backfill.skip', { n: chosen.length })}</Button>
+            </>
+          )}
+        </div>
         <ErrorText>{act.error}</ErrorText>
         {list.loading && !list.data ? <Loading />
-          : notConnected ? <Notice tone="warn">{t('backfill.notConnected')}</Notice>
+          : notConnected ? <div className="mt-2"><Notice tone="warn">{t('backfill.notConnected')}</Notice></div>
           : list.error ? <ErrorText>{list.error}</ErrorText>
           : rows.length === 0 ? <Empty>{t('backfill.empty')}</Empty>
-          : (
-            <TableWrap>
-              <thead><tr>
-                <th className={th}><input type="checkbox" aria-label={t('backfill.selectAll')} checked={allPicked}
-                  onChange={() => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.id)))} /></th>
-                <th className={th}>{t('common.vendor')}</th>
-                <th className={th}>{t('common.date')}</th>
-                <th className={th}>{t('common.total')}</th>
-                <th className={th}>{t('backfill.filename')}</th>
-                <th className={th}>{t('common.state')}</th>
-              </tr></thead>
-              <tbody>{rows.map((r) => <Row key={r.id} r={r} checked={picked.has(r.id)} onToggle={() => toggle(r.id)} />)}</tbody>
-            </TableWrap>
-          )}
-      </Card>
+          : <ul>{rows.map((r) => <Row key={r.id} r={r} checked={picked.has(r.id)} onToggle={() => toggle(r.id)} />)}</ul>}
+      </section>
     </div>
   );
 }
@@ -119,20 +114,24 @@ export default function Backfill() {
 function Row({ r, checked, onToggle }: { r: BackfillRow; checked: boolean; onToggle: () => void }) {
   const can = r.state === 'awaiting_backfill_approval';
   return (
-    <tr className={checked ? 'bg-teal-50/50' : ''}>
-      <td className={td}>
-        <input type="checkbox" className="h-5 w-5" disabled={!can} checked={checked} onChange={onToggle}
-          title={can ? undefined : t('backfill.notApprovable')} aria-label={r.vendor ?? r.id} />
-      </td>
-      <td className={td}><Link className="font-medium text-teal-800 hover:underline" to={`/items/${r.id}`}>{r.vendor ?? '—'}</Link></td>
-      <td className={`${td} whitespace-nowrap`}>{fmtDate(r.issueDate)}</td>
-      <td className={`${td} whitespace-nowrap`}>{fmtMoney(r.total, r.currency)}</td>
-      <td className={td}>
-        {r.filename ? <bdi className="ltr block break-all font-mono text-xs">{r.filename}</bdi> : '—'}
-        {r.folder && <bdi className="ltr block break-all font-mono text-xs text-slate-500">{r.folder}</bdi>}
-        {r.likelyDuplicate && <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900">⚠ {t('backfill.duplicate')}</span>}
-      </td>
-      <td className={td}><StateBadge state={r.state} /></td>
-    </tr>
+    <li className={`grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 py-3 ${rowCls} ${checked ? '-mx-2 rounded-xl bg-accent-tint px-2' : ''}`}>
+      <input type="checkbox" className="mt-0.5 size-5" disabled={!can} checked={checked} onChange={onToggle}
+        title={can ? undefined : t('backfill.notApprovable')} aria-label={r.vendor ?? r.id} />
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <Link className="min-w-0 truncate font-semibold hover:underline" to={`/items/${r.id}`}>{r.vendor ?? '—'}</Link>
+          <span className="num shrink-0 font-semibold">{fmtMoney(r.total, r.currency)}</span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <StateBadge state={r.state} />
+            {r.likelyDuplicate && <Flag>{t('backfill.duplicate')}</Flag>}
+          </span>
+          <span className="num text-[13px] text-muted">{fmtDate(r.issueDate)}</span>
+        </div>
+        {r.filename && <bdi className="ltr block break-all text-xs">{r.filename}</bdi>}
+        {r.folder && <bdi className="ltr block break-all text-xs text-muted">{r.folder}</bdi>}
+      </div>
+    </li>
   );
 }
