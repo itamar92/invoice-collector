@@ -46,6 +46,10 @@ export interface MorningClassification {
   id: string; title: string; key: string | null; code: string | null;
   irsCode: number | null; type: number | null; income: number | null; vat: number | null;
 }
+export interface RelayStatus {
+  configured: boolean; connected: boolean; botUsername: string | null;
+  chats: { id: string; name: string | null; linkedAt: string }[]; error?: string;
+}
 export interface SettingsResponse { settings: Settings; secrets: Record<SecretKey, boolean>; morningModes: MorningModes | null }
 
 /** A failed API call; `message` is already Hebrew. */
@@ -64,8 +68,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     res = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      // A Blob goes as the raw body under its own type (file upload); anything else as JSON.
+      headers: body === undefined ? {} : { 'content-type': body instanceof Blob ? body.type || 'application/octet-stream' : 'application/json' },
+      body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, 'network');
@@ -81,6 +86,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const get = <T>(p: string) => request<T>('GET', p);
 const send = <T>(m: 'POST' | 'PUT', p: string, b: unknown = {}) => request<T>(m, p, b);
+const del = <T>(p: string) => request<T>('DELETE', p);
 const enc = encodeURIComponent;
 
 export const api = {
@@ -107,6 +113,9 @@ export const api = {
   retry: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/retry`),
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
   ingestFailures: () => get<IngestFailure[]>('/api/ingest-failures'),
+  /** A photographed receipt (JPEG) or a PDF. Answers once it was read; `duplicate` points at the existing item. */
+  upload: (file: Blob, name: string) =>
+    send<{ id: string; duplicate: boolean; item: Item }>('POST', `/api/uploads?name=${enc(name.slice(0, 200))}`, file),
 
   vendors: () => get<Vendor[]>('/api/vendors'),
   setVendor: (key: string, patch: { status?: VendorStatus; defaultCategory?: string | null }) =>
@@ -130,6 +139,12 @@ export const api = {
   saveSettings: (patch: Partial<Settings>) => send<SettingsResponse>('PUT', '/api/settings', patch),
   /** Write-only: the value is never returned by any endpoint. */
   setSecret: (key: SecretKey, value: string) => send<{ key: string; configured: true }>('PUT', `/api/secrets/${key}`, { value }),
+  /** The shared Telegram bot this instance is connected to (through the hub in settings.telegramRelayUrl). */
+  relayStatus: () => get<RelayStatus>('/api/telegram/relay'),
+  /** A pairing link to open in Telegram; valid for a few minutes, one use. */
+  relayConnect: (invite?: string) => send<{ url: string; expiresAt: string }>('POST', '/api/telegram/relay/connect', invite ? { invite } : {}),
+  relayUnlink: (chatId: string) => del<{ ok: true }>(`/api/telegram/relay/chats/${enc(chatId)}`),
+  testTelegram: () => send<{ ok: boolean; username?: string; error?: string }>('POST', '/api/telegram/test'),
   testAi: () => send<{ ok: boolean; provider: string; error?: string }>('POST', '/api/ai/test'),
   detectMorning: () => send<{ modes: MorningModes; verified: false }>('POST', '/api/morning/detect'),
   morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),

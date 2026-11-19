@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import type { ExtractedFields, ItemState, Reason } from '../api.js';
 import {
@@ -49,6 +49,8 @@ export default function ItemDetail() {
   const [problems, setProblems] = useState<Reason[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const act = useAction();
+  // Arriving straight from an upload: say what happened to the file.
+  const uploaded = (useLocation().state as { uploaded?: 'new' | 'duplicate' } | null)?.uploaded;
 
   useEffect(() => { if (item) setDraft(toDraft(item.fields)); }, [item]);
 
@@ -97,6 +99,7 @@ export default function ItemDetail() {
         <div className="mt-1.5"><StateBadge state={item.state} /></div>
       </div>
       {item.reason && item.state === 'needs_attention' && <ErrorText>{t('common.reason')}: {reasonLabel(item.reason)}</ErrorText>}
+      {uploaded && !msg && !(uploaded === 'new' && item.state === 'needs_attention') && <Notice tone={uploaded === 'new' ? 'ok' : 'warn'}>{t(`upload.${uploaded}`)}</Notice>}
       {msg && <Notice tone="ok">{msg}</Notice>}
 
       {/* Phone: fields first, the document below. Desktop: side by side, the document stays in view. */}

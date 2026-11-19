@@ -14,7 +14,8 @@ function trustProxySetting(v: string | undefined): boolean | number | string {
   return /^\d+$/.test(v) ? parseInt(v, 10) : v;
 }
 
-export function createApp(api?: ApiContext): express.Express {
+/** `relay`: the shared Telegram bot hub's router, on an instance that runs one. */
+export function createApp(api?: ApiContext, relay?: express.Router): express.Express {
   const app = express();
   app.set('trust proxy', trustProxySetting(process.env.TRUST_PROXY));
   // Clickjacking: only our own pages may frame us (the item page frames its PDF route).
@@ -27,6 +28,8 @@ export function createApp(api?: ApiContext): express.Express {
   // Container health probe: before auth and the SPA fallback; deliberately exposes nothing but liveness.
   app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
   app.get('/api/health', (_req, res) => { res.json({ ok: true }); });
+  // Other instances talk to the hub with their own bearer credential, never the login cookie.
+  if (relay) app.use('/relay/v1', relay);
   app.use(authRouter());
   app.use(oauthRouter());
   // Before /api: token-authenticated, so the cookie-guarded /api router must not see it.

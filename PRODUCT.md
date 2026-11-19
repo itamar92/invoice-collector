@@ -26,6 +26,7 @@ is filed or sent to accounting without passing validation and duplicate checks.
 ## Operating Context
 
 Gmail (optionally one label) as the source, Dropbox as the archive, Morning as the accounting destination.
+Paper receipts come in as a photo or PDF, uploaded in the app or sent to a Telegram bot.
 A background worker runs on its own; the UI shows its last run and lets the owner trigger one. A one-time
 backfill covers the period before go-live. Israeli defaults: ILS, VAT 18%, Hebrew vendor names.
 

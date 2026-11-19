@@ -115,7 +115,44 @@ A reference implementation of the forced-command wrapper and its installer is th
 structure on your agent host. In Settings choose mode `ssh`, and enter host, port, user, and host-key
 fingerprint (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`).
 
-## 6. Protect it: Cloudflare Tunnel and Cloudflare Access
+## 6. Paper receipts: upload and the Telegram bot, optional
+
+Paper receipts (fuel, supermarket) and loose PDFs can be handed in directly; they go through the same steps as an
+emailed document. A photo is stored as a one-page PDF, and reading it needs an AI provider that accepts PDFs
+(Anthropic, OpenAI or Gemini; not the SSH agent).
+
+- **In the app**: the camera button (top bar on a phone, side rail on a desktop) takes a photo, a picture from the
+  library or a PDF. Several files can be picked at once. Up to 15 MB each.
+- **Shared Telegram bot** (no bot of your own needed):
+  1. Settings → Telegram bot: enter the address of the shared bot service (from whoever operates it) and save.
+  2. Press "connect Telegram", then "open in Telegram", and press Start in the chat that opens. The chat is now
+     connected. The link works once and for 15 minutes. If the operator gave you an invite code, enter it first.
+  3. Send a photo of a receipt (or a PDF as a file). The bot answers with what it read and a link to the item.
+
+  Send `/stop` in the chat, or remove the chat in Settings, to disconnect it.
+- **Your own bot** (alternative, nothing passes through anyone else):
+  1. In Telegram, talk to `@BotFather`, send `/newbot` and copy the token it gives you.
+  2. Settings → Telegram bot → your own bot: paste the token, then press "check the bot" to see its name.
+  3. Send the bot any message. It answers with the chat id; add that id under "allowed chats".
+
+  Use one bot token per running instance (two instances polling the same bot take each other's messages).
+
+Both use long polling, so an instance needs no public address for Telegram.
+
+### Operating the shared bot (hub)
+
+One instance can run a bot that serves many instances. Create the bot with `@BotFather`, then on that instance set
+`RELAY_BOT_TOKEN` (and optionally `RELAY_INVITE_KEY`, which instances must present to register) and restart. The hub
+answers at `PUBLIC_URL/relay/v1`; the address other instances enter in Settings is `PUBLIC_URL`. Your own instance
+connects to it the same way, with its own `PUBLIC_URL`. Do not also save this bot's token under "your own bot".
+
+What the hub holds: for each instance an id and the hash of its credential, the chats linked to it (chat id and
+display name), and, only while a document waits for its instance, Telegram's file id. It never stores a document:
+the bytes are fetched from Telegram when the owning instance asks, and pass through the hub on the way. Waiting
+documents are dropped after 7 days. If the hub sits behind Cloudflare Access (section 7), `/relay/v1/*` must be
+reachable without the Access login; it has its own per-instance credential.
+
+## 7. Protect it: Cloudflare Tunnel and Cloudflare Access
 
 Do not expose the container port to the internet. Recommended:
 
@@ -132,7 +169,7 @@ This is also what provides the HTTPS the app needs (see section 1): `PUBLIC_URL`
 
 Keep `APP_PASSWORD` and `API_TOKEN` long and unique, even behind Access.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 - `SECRET_KEY is not set`: the app refuses to start without it.
 - `redirect_uri_mismatch`: the URI registered at Google or Dropbox must match `PUBLIC_URL` plus the path above,

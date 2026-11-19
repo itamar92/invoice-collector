@@ -33,4 +33,6 @@ export const IL_DEFAULTS: Settings = {
   lastTickError: null,
   lastAiSuccessAt: null,
   lastMissedScanAt: null,
+  telegramChatIds: [],
+  telegramRelayUrl: '',
 };

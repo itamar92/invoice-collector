@@ -38,6 +38,10 @@ export type Settings = {
   lastTickError: string | null;
   lastAiSuccessAt: string | null;
   lastMissedScanAt: string | null;
+  /** Telegram chats allowed to hand in receipts through the bot (numeric chat ids, as strings). */
+  telegramChatIds: string[];
+  /** Address of a shared Telegram bot service (hub) this instance connects to; empty = none. */
+  telegramRelayUrl: string;
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

@@ -3,7 +3,7 @@ import { getSettings } from '../settings.js';
 import { AiUnavailableError, aiExtract, aiWriteRecipe } from '../ai/provider.js';
 import { markReceiptFor, findReceiptForSentInvoice, sha256 } from './dedupe.js';
 import {
-  getEmail, getItem, getItemPdf, noteItem, setItemFields, setItemText, setItemVendor, transition, transitionIf,
+  getEmail, getItem, getItemPdf, isUploadId, noteItem, setItemFields, setItemText, setItemVendor, transition, transitionIf,
   updateItem,
   type Item,
 } from './items.js';
@@ -118,7 +118,9 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   if (doc.isScan && !ai) return moveTo(item.id, 'needs_attention', 'unreadable_pdf', 'scanned pdf, no ai');
   if (doc.isScan && !ai?.supportsPdf) return moveTo(item.id, 'needs_attention', 'scan_needs_api_ai');
 
-  const sender = bareAddress(getEmail(item.messageId)?.sender ?? '');
+  // An uploaded document has no sender: only text markers can match a recipe to it.
+  const uploaded = isUploadId(item.messageId);
+  const sender = uploaded ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
   const today = localDate(deps);
   let recipe = findRecipe(sender, doc.text);
 
@@ -195,7 +197,8 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   const v = validateFields(fields, settings, today);
   if (!v.ok) return moveTo(item.id, 'needs_attention', v.problems[0], v.problems.join(','));
 
-  if (writeRecipe && ai && vendorKey) {
+  // A photographed receipt has no text and no sender, so there is nothing a recipe could match or read.
+  if (writeRecipe && ai && vendorKey && !(uploaded && doc.isScan)) {
     await writeAiRecipe(item.id, ai, {
       text: doc.text, sender, fields, vendorKey, displayName,
       // No-match path: an existing vendor (e.g. a new sender address) keeps what its recipe already knows.

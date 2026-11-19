@@ -10,6 +10,9 @@ import { MorningAccounting } from './server/destinations/morning.js';
 import { getSecret } from './server/secrets.js';
 import { getSettings } from './server/settings.js';
 import { GmailClient } from './server/sources/gmail.js';
+import { createHub } from './server/relay/hub.js';
+import { startRelayClient } from './server/sources/relayClient.js';
+import { startTelegramBot } from './server/sources/telegram.js';
 import { startWorker } from './server/worker.js';
 
 const problems = envProblems(process.env);
@@ -33,9 +36,19 @@ const getContext = () => {
   };
 };
 const worker = startWorker(getContext);
+// Receipts sent to the Telegram bot; idle until a bot token is saved in Settings.
+const botDeps = () => { try { return getContext().deps; } catch { return null; } };
+startTelegramBot(botDeps);
+// Receipts sent to a shared bot this instance is connected to (Settings); idle otherwise.
+startRelayClient(botDeps);
+// Operator only: RELAY_BOT_TOKEN makes this instance the shared bot's hub for other instances.
+const hub = process.env.RELAY_BOT_TOKEN
+  ? createHub({ token: process.env.RELAY_BOT_TOKEN, inviteKey: process.env.RELAY_INVITE_KEY || undefined })
+  : null;
+hub?.start();
 
 const port = parseInt(process.env.PORT || '3100');
-const app = createApp({ getDeps: getContext, runTick: worker.tick });
+const app = createApp({ getDeps: getContext, runTick: worker.tick }, hub?.router);
 // Production serves the built UI (vite build -> dist/); in development Vite serves it and proxies /api here.
 if (process.env.NODE_ENV === 'production') serveSpa(app, path.resolve('dist'));
 app.listen(port, () => console.log(`invoice-collector listening on :${port}`));
