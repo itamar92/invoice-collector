@@ -1,5 +1,38 @@
 # Morning (Green Invoice) API: what Task 12 relies on
 
+> **2026-11 update (API v2).** The official spec is now an OpenAPI file:
+> `https://developers.morning.co/docs/openapi.bundled.json`. It drops `POST /expenses/file` and `POST /account/token`.
+> The code now uses the v2 login and the v2 two-step upload (sections "Auth (v2)" and "Expense upload (v2)" below).
+> The older notes further down are kept for history. Where they disagree, the v2 sections win.
+
+## Auth (v2)
+- `POST https://api.morning.co/idp/v1/oauth/token` with body `{grant_type:"client_credentials", client_id, client_secret}`
+  returns `{accessToken, tokenType:"Bearer", expiresAt}` (unix seconds, 1 hour). Errors follow RFC 6749
+  (`invalid_client` and similar). Source: official v2 spec. The same key id/secret as before go in `client_id`/`client_secret`.
+- v2 tokens are accepted by the classic `api.greeninvoice.co.il/api/v1` endpoints (morning-cli, verified live 2026-08).
+- Fallback: if the login host can't be reached, answers 404, or refuses the keys (400/401/403), the code tries the
+  legacy `POST /account/token` once. It reports "credentials rejected" only if the legacy endpoint refuses too.
+  429/5xx from the login host is transient. Unknown: whether a *legacy* token is accepted by the v2 upload host.
+- Hosts: `MORNING_GATEWAY_URL` (login, default `https://api.morning.co`, sandbox `https://api.sandbox.morning.dev`).
+
+## Expense upload (v2), used by api_file
+1. `GET {upload host}/file-upload/v1/url?context=expense&data={"source":5}` (authenticated) returns
+   `{url, fields, maxFileSize}`, a pre-signed S3 POST that is valid for **60 seconds**. Here `data {"source":5}` means
+   "new draft". Upload host: `MORNING_UPLOAD_URL`, defaulting to the login host. Production `https://api.morning.co`,
+   sandbox `https://api.sandbox.d.greeninvoice.co.il` (the sandbox splits the two hosts).
+2. Multipart `POST {url}` with every `fields` entry copied verbatim, and `file` **last**. There is no Morning auth
+   header. S3 answers `204`. `fields.key` contains `${filename}`, which S3 replaces with the uploaded file's name.
+- Uploading always creates an **expense draft**, which becomes an expense only after approval (official spec).
+  Processing is asynchronous: results arrive as the webhooks `expense-draft/parsed`, `expense-draft/declined` and
+  `file/infected`. There is **no draft id in the response**, so the stored accounting ref is the S3 object key.
+- The draft can't receive our fields. `POST /expenses` (full body including `accountingClassification`) creates a
+  real expense, so it is still not used. api_fields stays off.
+- Errors: a PDF over `maxFileSize`, or S3 `EntityTooLarge`, is rejected. An expired presign (S3 403), S3 5xx or a network
+  failure is transient, and the retry fetches a fresh presign. A presign without an https `url` or `fields` is transient.
+- Draft statuses (official): `10` new, `50` failed, `200` declined.
+- Retry safety (R16) is unchanged: a retry first searches recent drafts. Since parsing is async, a retry that arrives
+  before Morning has parsed the first upload can still create a duplicate draft (same residual risk as before).
+
 R6: this was researched from public material only. The implementer made no calls to Morning.
 "confirmed (source)" = read in Morning's own working code/docs; "from community schema" = read in a third-party wrapper, not verified against Morning docs; "assumed" = inferred.
 
@@ -13,6 +46,14 @@ generated from Morning's swagger), plus the working read code in
 - Base `https://api.greeninvoice.co.il/api/v1`; sandbox `https://sandbox.d.greeninvoice.co.il/api/v1`. confirmed (morningClient.ts; sandbox host from the task brief, unverified).
 - `POST /account/token` body `{id, secret}` returns `{token, expires}` (unix seconds). Header `Authorization: Bearer <token>`. confirmed (morningClient.ts, working in production).
 - Token cache until 30 s before expiry; 1 hour validity. confirmed (morningClient.ts; developers.morning.co landing page says 1-hour token).
+
+## Accounting classifications (expense categories)
+- `GET /accounting/classifications/map` (no body) returns the business's classifications as a nested tree (groups
+  with classifications inside). Each selectable entry has `id` (UUID), `title`, `key`, `code`, `irsCode`, `type`,
+  `income`, `vat`; group nodes carry `group: true`. The `id` is what an expense's `accountingClassification.id` takes.
+  Status: not in the official v2 OpenAPI spec (which only says "see the Get Accounting Classifications endpoint"), but
+  used by several working clients and reported as still served on production (morning-cli changelog, verified live
+  2026-08-11). Read-only. Used by `fetchMorningClassifications` → `GET /api/morning/classifications`.
 
 ## Expense endpoints
 | Purpose | Endpoint | Status |

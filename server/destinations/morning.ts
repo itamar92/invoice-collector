@@ -6,6 +6,11 @@ import { getSecret } from '../secrets.js';
 
 /** Endpoints and their provenance: docs/morning-api.md. No approve/report/confirm endpoint is ever called. */
 const DEFAULT_BASE = 'https://api.greeninvoice.co.il/api/v1';
+/**
+ * Morning API v2 hosts. Production serves the OAuth login and the file-upload URL from one host; the sandbox splits
+ * them (login https://api.sandbox.morning.dev, upload https://api.sandbox.d.greeninvoice.co.il), hence two settings.
+ */
+const DEFAULT_GATEWAY = 'https://api.morning.co';
 const DRAFT_LOOKBACK_DAYS = 7;
 
 export type Mailer = (to: string, subject: string, filename: string, pdf: Buffer) => Promise<string>;
@@ -13,6 +18,10 @@ export type Mailer = (to: string, subject: string, filename: string, pdf: Buffer
 export interface MorningOptions {
   fetchImpl?: typeof fetch;
   baseUrl?: string;
+  /** OAuth login host (env MORNING_GATEWAY_URL). */
+  gatewayUrl?: string;
+  /** File-upload URL host (env MORNING_UPLOAD_URL); defaults to the gateway. */
+  uploadUrl?: string;
   mailer?: Mailer;
   getSettings?: () => Settings;
   now?: () => Date;
@@ -20,14 +29,18 @@ export interface MorningOptions {
 
 interface Resp { status: number; body: any }
 
+/** Pre-signed upload target returned by GET /file-upload/v1/url. */
+interface Presign { url: string; fields: Record<string, string>; maxFileSize?: number }
+
 class Client {
   private token: { value: string; expiresAt: number } | null = null;
-  constructor(private f: typeof fetch, private base: string, private now: () => Date) {}
+  constructor(private f: typeof fetch, private base: string, private gateway: string, private uploadHost: string, private now: () => Date) {}
 
-  private async raw(method: string, path: string, headers: Record<string, string>, payload: unknown): Promise<Resp> {
+  private async raw(method: string, url: string, headers: Record<string, string>, payload?: unknown): Promise<Resp> {
     let res: Response;
     try {
-      res = await this.f(this.base + path, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(payload) });
+      const body = payload === undefined ? undefined : JSON.stringify(payload);
+      res = await this.f(url, { method, headers: { 'Content-Type': 'application/json', ...headers }, body });
     } catch (e) {
       throw new TransientError(`Morning unreachable: ${(e as Error).message}`);
     }
@@ -37,26 +50,57 @@ class Client {
     return { status: res.status, body };
   }
 
+  private remember(value: string, expiresAtMs: number): string {
+    this.token = { value, expiresAt: expiresAtMs };
+    return value;
+  }
+
+  /**
+   * OAuth client_credentials (API v2) first; the legacy POST /account/token only when the IDP is unreachable or
+   * refuses the keys (older keys may still be legacy-only). Both refusing = credentials rejected.
+   */
   private async auth(): Promise<string> {
     const t = this.token;
     if (t && t.expiresAt > this.now().getTime() + 30_000) return t.value;
     const id = getSecret('morning_id');
     const secret = getSecret('morning_secret');
     if (!id || !secret) throw new AccountingRejected('Morning credentials are not configured');
-    const r = await this.raw('POST', '/account/token', {}, { id, secret });
-    if (r.status === 401 || r.status === 403) throw new AccountingRejected('Morning credentials rejected');
+    const fallbackExpiry = () => this.now().getTime() + 50 * 60_000;
+
+    let o: Resp | null = null;
+    try {
+      o = await this.raw('POST', this.gateway + '/idp/v1/oauth/token', {},
+        { grant_type: 'client_credentials', client_id: id, client_secret: secret });
+    } catch { /* IDP unreachable: try legacy */ }
+    if (o && (o.status === 429 || o.status >= 500)) throw new TransientError(`Morning auth ${o.status}`);
+    if (o && o.status >= 200 && o.status < 300) {
+      const tok = o.body?.accessToken ?? o.body?.access_token;
+      if (!tok) throw new TransientError('Morning auth returned no token');
+      const exp = typeof o.body.expiresAt === 'number' ? o.body.expiresAt * 1000
+        : typeof o.body.expires_in === 'number' ? this.now().getTime() + o.body.expires_in * 1000 : fallbackExpiry();
+      return this.remember(String(tok), exp);
+    }
+
+    const r = await this.raw('POST', this.base + '/account/token', {}, { id, secret });
+    if (r.status === 401 || r.status === 403 || (r.status === 404 && o)) throw new AccountingRejected('Morning credentials rejected');
     const mapped = mapStatus(r);
     if (mapped) throw mapped;
     if (!r.body?.token) throw new TransientError('Morning auth returned no token');
-    const expiresAt = r.body.expires ? r.body.expires * 1000 : this.now().getTime() + 50 * 60_000;
-    this.token = { value: r.body.token, expiresAt };
-    return r.body.token;
+    return this.remember(r.body.token, r.body.expires ? r.body.expires * 1000 : fallbackExpiry());
   }
 
-  /** Authenticated POST; returns the JSON body of a 2xx, else throws Transient/Rejected. */
-  async post(path: string, payload: unknown): Promise<any> {
+  /** Authenticated POST on the API base; returns the JSON body of a 2xx, else throws Transient/Rejected. */
+  post(path: string, payload: unknown): Promise<any> { return this.call('POST', this.base + path, payload); }
+
+  /** Authenticated GET (no body) on the API base; same error mapping as post. */
+  get(path: string): Promise<any> { return this.call('GET', this.base + path); }
+
+  /** Authenticated GET on the v2 file-upload host. */
+  getUpload(path: string): Promise<any> { return this.call('GET', this.uploadHost + path); }
+
+  private async call(method: 'GET' | 'POST', url: string, payload?: unknown): Promise<any> {
     const token = await this.auth();
-    const r = await this.raw('POST', path, { Authorization: `Bearer ${token}` }, payload);
+    const r = await this.raw(method, url, { Authorization: `Bearer ${token}` }, payload);
     if (r.status === 401) {
       this.token = null; // auth may be momentary: caller's retry re-authenticates
       throw new TransientError('Morning returned 401');
@@ -65,12 +109,54 @@ class Client {
     if (err) throw err;
     return r.body;
   }
+
+  /**
+   * Step 2 of the upload: multipart POST straight to the pre-signed S3 URL (no Morning auth header). Every presigned
+   * field goes in verbatim and the file goes LAST, or S3 refuses it. An expired presign (403) is transient: the
+   * retry asks for a fresh one.
+   */
+  async uploadPresigned(p: Presign, pdf: Buffer, filename: string): Promise<void> {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(p.fields)) form.append(k, String(v));
+    form.append('file', new Blob([new Uint8Array(pdf)], { type: 'application/pdf' }), filename);
+    let res: Response;
+    try {
+      res = await this.f(p.url, { method: 'POST', body: form });
+    } catch (e) {
+      throw new TransientError(`Morning upload unreachable: ${(e as Error).message}`);
+    }
+    if (res.ok) return;
+    const text = await res.text().catch(() => '');
+    if (/EntityTooLarge/.test(text)) throw new AccountingRejected('PDF is larger than Morning accepts');
+    throw new TransientError(`Morning upload failed (${res.status})`);
+  }
 }
 
 function mapStatus(r: Resp): Error | null {
   if (r.status >= 200 && r.status < 300) return null;
   if (r.status === 429 || r.status >= 500) return new TransientError(`Morning ${r.status}`);
-  return new AccountingRejected(String(r.body?.errorMessage ?? r.body?.message ?? `Morning rejected the request (${r.status})`));
+  return new AccountingRejected(String(r.body?.errorMessage ?? r.body?.message ?? r.body?.error_description ?? `Morning rejected the request (${r.status})`));
+}
+
+type HostOptions = Pick<MorningOptions, 'fetchImpl' | 'baseUrl' | 'gatewayUrl' | 'uploadUrl'>;
+
+function makeClient(opts: HostOptions, now: () => Date): Client {
+  const trim = (u: string) => u.replace(/\/+$/, '');
+  const gateway = trim(opts.gatewayUrl ?? process.env.MORNING_GATEWAY_URL ?? DEFAULT_GATEWAY);
+  return new Client(
+    opts.fetchImpl ?? ((...a) => fetch(...a)),
+    opts.baseUrl ?? process.env.GREEN_INVOICE_BASE_URL ?? DEFAULT_BASE,
+    gateway,
+    trim(opts.uploadUrl ?? process.env.MORNING_UPLOAD_URL ?? gateway),
+    now,
+  );
+}
+
+/** The name S3 substitutes into the object key's `${filename}`: no path parts, quotes or control characters. */
+function uploadName(filename: string): string {
+  const base = (filename.split(/[\\/]/).pop() ?? '').replace(/[\u0000-\u001f"]/g, '').trim().slice(0, 120);
+  const name = base || 'document.pdf';
+  return /\.pdf$/i.test(name) ? name : name + '.pdf';
 }
 
 function ymd(d: Date): string { return d.toISOString().slice(0, 10); }
@@ -83,7 +169,7 @@ export class MorningAccounting implements AccountingDestination {
 
   constructor(opts: MorningOptions = {}) {
     this.now = opts.now ?? (() => new Date());
-    this.client = new Client(opts.fetchImpl ?? ((...a) => fetch(...a)), opts.baseUrl ?? process.env.GREEN_INVOICE_BASE_URL ?? DEFAULT_BASE, this.now);
+    this.client = makeClient(opts, this.now);
     this.mailer = opts.mailer;
     this.getSettings = opts.getSettings ?? defaultGetSettings;
   }
@@ -104,19 +190,30 @@ export class MorningAccounting implements AccountingDestination {
   }
 
   /**
-   * api_fields cannot be done safely (docs/morning-api.md): attaching fields would need an endpoint that is not
-   * known to keep the draft unconfirmed. So both API modes upload the PDF as a draft and Morning reads it itself.
+   * api_fields cannot be done safely (docs/morning-api.md): the v2 API has no way to give a draft our fields, and
+   * POST /expenses makes an approved expense. So both API modes upload the PDF as a draft and Morning reads it itself.
+   *
+   * v2 two-step upload: GET /file-upload/v1/url (data {"source":5} = new draft) returns a 60-second pre-signed S3
+   * POST; the PDF goes there. S3 answers 204 and Morning creates the draft asynchronously, so there is no draft id
+   * yet: the ref is the uploaded object's key.
    */
-  private async sendFile(item: { pdf: Buffer; fields: ExtractedFields; retry?: boolean }) {
+  private async sendFile(item: { pdf: Buffer; filename: string; fields: ExtractedFields; retry?: boolean }) {
     // R16: a retry after a timeout must not create a second draft. Only a retry looks: on a first send any
     // matching draft belongs to another document.
     const existing = item.retry ? await this.findRecentDraft(item.fields) : null;
     if (existing) return { ref: existing, mode: 'api_file' as const };
-    const out = await this.client.post('/expenses/file', {
-      file: 'data:application/pdf;base64,' + item.pdf.toString('base64'),
-    });
-    if (!out?.id) throw new TransientError('Morning upload returned no draft id');
-    return { ref: String(out.id), mode: 'api_file' as const };
+    const data = encodeURIComponent(JSON.stringify({ source: 5 }));
+    const p = await this.client.getUpload(`/file-upload/v1/url?context=expense&data=${data}`);
+    if (typeof p?.url !== 'string' || !/^https:\/\//.test(p.url) || !p.fields || typeof p.fields !== 'object') {
+      throw new TransientError('Morning returned no upload URL');
+    }
+    if (typeof p.maxFileSize === 'number' && item.pdf.length > p.maxFileSize) {
+      throw new AccountingRejected(`PDF is larger than Morning accepts (${Math.floor(p.maxFileSize / 1_048_576)} MB)`);
+    }
+    const name = uploadName(item.filename);
+    await this.client.uploadPresigned(p as Presign, item.pdf, name);
+    const key = typeof p.fields.key === 'string' ? p.fields.key.replace('${filename}', name) : '';
+    return { ref: key || `upload:${this.now().toISOString()}`, mode: 'api_file' as const };
   }
 
   /** A recent draft that is provably this document: same number, same amount and same supplier. */
@@ -144,13 +241,53 @@ function isSameDocument(e: any, f: ExtractedFields): boolean {
 }
 
 /** api_fields is unconfirmed (docs/morning-api.md) so always false; api_file needs a working read-only drafts search. */
-export async function detectMorningModes(opts: Pick<MorningOptions, 'fetchImpl' | 'baseUrl'> = {}):
+export async function detectMorningModes(opts: HostOptions = {}):
   Promise<{ api_fields: boolean; api_file: boolean }> {
-  const client = new Client(opts.fetchImpl ?? ((...a) => fetch(...a)), opts.baseUrl ?? process.env.GREEN_INVOICE_BASE_URL ?? DEFAULT_BASE, () => new Date());
+  const client = makeClient(opts, () => new Date());
   try {
     await client.post('/expenses/drafts/search', { page: 1, pageSize: 1 });
     return { api_fields: false, api_file: true };
   } catch {
     return { api_fields: false, api_file: false };
   }
+}
+
+/** One selectable Morning expense category ("accounting classification"). `id` is what an expense's accountingClassification takes. */
+export interface MorningClassification {
+  id: string;
+  title: string;
+  key: string | null;
+  code: string | null;
+  irsCode: number | null;
+  type: number | null;
+  income: number | null;
+  vat: number | null;
+}
+
+/**
+ * Read-only: every accounting classification (expense category) on the business, via
+ * GET /accounting/classifications/map (docs/morning-api.md). The map nests classifications inside groups, so the
+ * whole tree is walked; group nodes and entries without an id are skipped, duplicates collapse by id.
+ */
+export async function fetchMorningClassifications(opts: HostOptions = {}):
+  Promise<MorningClassification[]> {
+  const client = makeClient(opts, () => new Date());
+  const out = new Map<string, MorningClassification>();
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : typeof v === 'number' ? String(v) : null);
+  const walk = (v: unknown, depth: number): void => {
+    if (depth > 8 || v === null || typeof v !== 'object') return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, depth + 1)); return; }
+    const o = v as Record<string, unknown>;
+    const title = str(o.title) ?? str(o.name);
+    if (typeof o.id === 'string' && o.id && title && o.group !== true && !out.has(o.id)) {
+      out.set(o.id, {
+        id: o.id, title, key: str(o.key), code: str(o.code), irsCode: num(o.irsCode),
+        type: num(o.type), income: num(o.income), vat: num(o.vat),
+      });
+    }
+    for (const x of Object.values(o)) walk(x, depth + 1);
+  };
+  walk(await client.get('/accounting/classifications/map'), 0);
+  return [...out.values()].sort((a, b) => a.title.localeCompare(b.title, 'he'));
 }

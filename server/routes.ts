@@ -20,7 +20,7 @@ import {
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
-import { detectMorningModes } from './destinations/morning.js';
+import { detectMorningModes, fetchMorningClassifications, type MorningClassification } from './destinations/morning.js';
 import { secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
 import { stats } from './stats.js';
 import { sanitizeError, summary, worthSince } from './summary.js';
@@ -40,6 +40,8 @@ export interface ApiContext {
   getAi?: () => AiProvider | null;
   /** Injectable for tests; default makes the (read-only) Morning detection calls. */
   detectMorning?: () => Promise<{ api_fields: boolean; api_file: boolean }>;
+  /** Injectable for tests; default reads the categories from Morning (read-only GET). */
+  morningClassifications?: () => Promise<MorningClassification[]>;
   now?: () => Date;
 }
 
@@ -421,6 +423,15 @@ export function apiRouter(ctx: ApiContext): express.Router {
     morningModes = await (ctx.detectMorning ?? detectMorningModes)();
     // Detected from the public docs and a read-only probe; not a verified document upload (R6).
     res.json({ modes: morningModes, verified: false });
+  }));
+
+  r.get('/morning/classifications', wrap(async (_req, res) => {
+    try {
+      res.json({ classifications: await (ctx.morningClassifications ?? fetchMorningClassifications)() });
+    } catch (e) {
+      // Not configured / rejected credentials / Morning down: a clean 502, never a stack or a secret.
+      res.status(502).json({ error: 'morning_unavailable', message: sanitizeError(e instanceof Error ? e.message : String(e)) });
+    }
   }));
 
   r.use((_req, res) => { res.status(404).json({ error: 'not_found' }); });
