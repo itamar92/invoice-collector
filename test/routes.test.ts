@@ -338,6 +338,17 @@ test('ai/test pings; morning/detect reports docs-detected modes, not verified', 
   assert.deepEqual(((await (await m.call('GET', '/api/settings')).json()) as any).morningModes, d.modes);
 });
 
+test('morning/classifications lists categories; a Morning failure is a clean 502', async () => {
+  const ok = await boot({ morningClassifications: async () => [{ id: 'c1', title: 'רכב', key: null, code: null, irsCode: 1310, type: null, income: null, vat: null }] });
+  const r = await ok.call('GET', '/api/morning/classifications');
+  assert.equal(r.status, 200);
+  assert.equal(((await r.json()) as any).classifications[0].id, 'c1');
+  const bad = await boot({ morningClassifications: async () => { throw new Error('Morning credentials are not configured'); } });
+  const b = await bad.call('GET', '/api/morning/classifications');
+  assert.equal(b.status, 502);
+  assert.equal(((await b.json()) as any).error, 'morning_unavailable');
+});
+
 const post = (c: Awaited<ReturnType<typeof boot>>, path: string, body?: unknown) => c.call('POST', path, body ?? {});
 
 test('malformed JSON -> 400 JSON without a stack; authenticated unknown /api path -> 404 JSON', async () => {

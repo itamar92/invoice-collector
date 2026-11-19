@@ -41,6 +41,11 @@ export interface MissedRow {
 export interface IngestFailure { messageId: string; mode: string; error: string; attempts: number; firstAt: string; lastAt: string }
 
 export type MorningModes = { api_fields: boolean; api_file: boolean };
+/** A Morning expense category; `id` goes into Category.accountingClassification. */
+export interface MorningClassification {
+  id: string; title: string; key: string | null; code: string | null;
+  irsCode: number | null; type: number | null; income: number | null; vat: number | null;
+}
 export interface SettingsResponse { settings: Settings; secrets: Record<SecretKey, boolean>; morningModes: MorningModes | null }
 
 /** A failed API call; `message` is already Hebrew. */
@@ -127,6 +132,7 @@ export const api = {
   setSecret: (key: SecretKey, value: string) => send<{ key: string; configured: true }>('PUT', `/api/secrets/${key}`, { value }),
   testAi: () => send<{ ok: boolean; provider: string; error?: string }>('POST', '/api/ai/test'),
   detectMorning: () => send<{ modes: MorningModes; verified: false }>('POST', '/api/morning/detect'),
+  morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),
   gmailLabels: () => get<{ labels: string[] }>('/api/gmail/labels'),
 };
 
