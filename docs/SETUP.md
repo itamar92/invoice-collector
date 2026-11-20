@@ -54,6 +54,38 @@ Tunnel (`deploy/docker-compose.oci.yml`). No inbound ports have to be opened in 
 Re-run the script to ship new code; `.env` and the data volume are kept. Back up `SECRET_KEY` and the
 `invoice-data` volume (`docker run --rm -v invoice-collector_invoice-data:/d -v $PWD:/b alpine tar czf /b/data.tgz -C /d .`).
 
+### Automatic deploys from GitHub
+
+`.github/workflows/deploy.yml` deploys every push to `main` (so every merged PR): it runs lint, tests and the
+build, then runs `deploy/deploy-oci.sh` from GitHub's runner against the VM. If the checks fail, nothing is
+deployed. You can also start it by hand: Actions, Deploy, Run workflow. Do the first deploy from your Mac (above)
+so the VM already has its `.env`.
+
+One-time setup, from your Mac:
+
+1. Make a key used only for deploys, and let it into the VM:
+
+   ```sh
+   ssh-keygen -t ed25519 -N '' -C invoice-collector-deploy -f ~/.ssh/ic_deploy
+   ssh-copy-id -i ~/.ssh/ic_deploy.pub ubuntu@<vm-public-ip>
+   ```
+
+2. Store three repository secrets (or Settings, Secrets and variables, Actions, in the browser):
+
+   ```sh
+   gh secret set DEPLOY_HOST --body 'ubuntu@<vm-public-ip>'
+   gh secret set DEPLOY_SSH_KEY < ~/.ssh/ic_deploy
+   ssh-keyscan -t ed25519 <vm-public-ip> | gh secret set DEPLOY_KNOWN_HOSTS
+   ```
+
+   `DEPLOY_KNOWN_HOSTS` pins the VM's host key, so the workflow refuses to talk to any other machine. Run the
+   `ssh-keyscan` from a network you trust, and if the VM is ever rebuilt, set it again.
+
+3. Optional: Settings, Environments, `production`, add yourself as a required reviewer to approve each deploy.
+
+To stop automatic deploys, disable the workflow (Actions, Deploy, ...) or remove the deploy key from the VM's
+`~/.ssh/authorized_keys`.
+
 ## 2. Google (Gmail API)
 
 1. In the [Google Cloud Console](https://console.cloud.google.com/) create a project and enable the **Gmail API**.
