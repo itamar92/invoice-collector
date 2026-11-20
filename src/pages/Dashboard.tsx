@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Stats } from '../api.js';
-import { Card, Empty, ErrorText, fmtMoney, inputCls, Loading, PageTitle, rowCls, useApp, useLoad } from '../components/ui.js';
+import { ButtonLink, Card, Dot, Empty, ErrorText, fmtMoney, inputCls, Loading, PageTitle, rowCls, useApp, useLoad } from '../components/ui.js';
+import type { MessageKey } from '../i18n/he.js';
 import { t } from '../i18n/he.js';
 
 const SLOTS = 8;
@@ -74,9 +75,40 @@ function Swatch({ color }: { color: string }) {
   return <span aria-hidden="true" className="inline-block size-3 shrink-0 rounded-[4px]" style={{ background: color }} />;
 }
 
+/**
+ * The summary counts only what is already in Dropbox. Everything found but not filed yet is listed here with the
+ * step it waits for, so an empty summary after the first scan says what to do next instead of looking broken.
+ */
+function NotFiledYet() {
+  const { summary } = useApp();
+  if (!summary) return null;
+  const all: { n: number; key: MessageKey; to?: string; action?: MessageKey; tone: string }[] = [
+    { n: summary.backfillWaiting, key: 'dash.pending.backfill', to: '/backfill', action: 'dash.pending.toBackfill', tone: 'bg-info' },
+    { n: summary.awaitingVendor, key: 'dash.pending.vendor', to: '/attention', action: 'dash.pending.toVendors', tone: 'bg-warn' },
+    { n: summary.needsAttention, key: 'dash.pending.attention', to: '/attention', action: 'dash.pending.toAttention', tone: 'bg-alert' },
+    { n: summary.inProgress + summary.waitingAi, key: 'dash.pending.progress', tone: 'border-2 border-info' },
+  ];
+  const rows = all.filter((r) => r.n > 0);
+  if (!rows.length) return null;
+  return (
+    <Card title={t('dash.pending.title')}>
+      <p className="text-[13px] text-muted">{t('dash.pending.intro')}</p>
+      <ul>
+        {rows.map((r) => (
+          <li key={r.key} className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2.5 ${rowCls}`}>
+            <span className="flex items-center gap-2.5 text-sm"><Dot className={r.tone} /><span>{t(r.key, { n: r.n })}</span></span>
+            {r.to && r.action && <ButtonLink to={r.to} variant={r === rows[0] ? 'primary' : 'secondary'}>{t(r.action)}</ButtonLink>}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 /** How many filed documents went to each category this year, and how they spread over the months. */
 export default function Dashboard() {
-  const { settings } = useApp();
+  const { settings, refreshSummary } = useApp();
+  useEffect(() => { void refreshSummary(); }, [refreshSummary]);
   const [year, setYear] = useState<number | undefined>(undefined);
   const [active, setActive] = useState<string | null>(null);
   const load = useLoad(() => api.stats(year), [year]);
@@ -98,6 +130,7 @@ export default function Dashboard() {
         {t('dash.title')}
       </PageTitle>
       <p className="text-sm text-muted">{t('dash.intro')}</p>
+      <NotFiledYet />
       {load.loading && !s && <Loading />}
       <ErrorText>{load.error}</ErrorText>
 

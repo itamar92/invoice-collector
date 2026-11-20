@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigationType } from 'react-router-dom';
 import { api, GMAIL_SEND_SCOPE } from './api.js';
 import type { SettingsResponse } from './api.js';
-import { Button, CountBadge, ErrorText, fmtDateTime, Icon, Notice, useAction, useApp } from './components/ui.js';
+import { Button, CountBadge, ErrorText, fmtDateTime, Icon, Notice, takeFlash, useAction, useApp } from './components/ui.js';
 import { useUploadReceipt } from './components/UploadReceipt.js';
 import type { IconName } from './components/ui.js';
 import { t } from './i18n/he.js';
@@ -35,6 +35,40 @@ const NAV: NavItem[] = [
 const TABS = NAV.slice(0, 4);
 const MORE = NAV.slice(4);
 
+/** Scroll position per history entry, so Back lands where the user was (lists load async, so it retries). */
+const scrollAt = new Map<string, number>();
+
+function useScrollMemory(): void {
+  const loc = useLocation();
+  const nav = useNavigationType();
+  const key = useRef(loc.key);
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+    const save = () => { scrollAt.set(key.current, window.scrollY); };
+    window.addEventListener('scroll', save, { passive: true });
+    return () => window.removeEventListener('scroll', save);
+  }, []);
+  // Layout effect: the key must switch before the browser reports the scroll the new page causes.
+  useLayoutEffect(() => {
+    key.current = loc.key;
+    const target = nav === 'POP' ? scrollAt.get(loc.key) : undefined;
+    if (target === undefined) { if (nav === 'PUSH' && !loc.hash) window.scrollTo(0, 0); return; }
+    let tries = 0;
+    let frame = 0;
+    const tryRestore = () => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      window.scrollTo(0, Math.min(target, Math.max(0, max)));
+      if (max < target && tries++ < 90) frame = requestAnimationFrame(tryRestore); // page still loading
+    };
+    tryRestore();
+    // The user scrolling meanwhile wins over the restore.
+    const stop = () => cancelAnimationFrame(frame);
+    window.addEventListener('wheel', stop, { once: true, passive: true });
+    window.addEventListener('touchmove', stop, { once: true, passive: true });
+    return () => { stop(); window.removeEventListener('wheel', stop); window.removeEventListener('touchmove', stop); };
+  }, [loc.key]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export function Brand({ className = '' }: { className?: string }) {
   return (
     <span className={`flex items-center gap-2 ${className}`}>
@@ -55,6 +89,16 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
   const inMore = MORE.some((n) => loc.pathname.startsWith(n.to));
 
   useEffect(() => { setOpen(false); }, [loc.pathname]);
+  useScrollMemory();
+  // A note left by the page we came from (e.g. a document just approved), shown once here.
+  const [flash, setFlashNote] = useState<string | null>(null);
+  useEffect(() => {
+    const m = takeFlash();
+    setFlashNote(m);
+    if (!m) return;
+    const id = setTimeout(() => setFlashNote(null), 6000);
+    return () => clearTimeout(id);
+  }, [loc.key]);
 
   const runNow = () => run.run(async () => { await api.runWorker(); await refreshSummary(); });
   const logout = async () => { try { await api.logout(); } finally { onLogout(); } };
@@ -122,6 +166,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <div className="mx-auto max-w-4xl space-y-4">
           <p className="text-xs text-muted md:hidden">{lastRun}</p>
           <ErrorText>{run.error}</ErrorText>
+          {flash && <div role="status" className="sticky top-16 z-20 md:top-4"><Notice tone="ok">{flash}</Notice></div>}
           {upload.busy && <Notice>{t('upload.busy')}</Notice>}
           <ErrorText>{upload.error}</ErrorText>
           {summary?.lastTickError && <ErrorText>{t('banner.tickError', { error: summary.lastTickError })}</ErrorText>}

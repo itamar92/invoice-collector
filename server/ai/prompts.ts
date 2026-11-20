@@ -49,7 +49,7 @@ export const EXTRACT_SYSTEM = [
   '- category: exactly one of the allowed categories given in the request, or null if none fits',
 ].join('\n');
 
-const strip = (s: string): string => s.replace(/<\/?(invoice_text|sender|previous_recipe|allowed_categories)>/gi, '');
+const strip = (s: string): string => s.replace(/<\/?(invoice_text|sender|previous_recipe|allowed_categories|owner_feedback)>/gi, '');
 
 export function extractUserPrompt(i: { text: string; sender: string; categories: string[]; hasPdf: boolean }): string {
   return [
@@ -81,11 +81,14 @@ export const RECIPE_SYSTEM = [
   'Do not hard-code values that change per invoice. Only include fields you can extract reliably.',
 ].join('\n');
 
-export function recipeUserPrompt(i: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe }): string {
+export function recipeUserPrompt(i: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe; feedback?: string }): string {
   return [
     `<sender>${strip(i.sender)}</sender>`,
     `Correct values to reproduce: ${JSON.stringify(i.fields)}`,
-    i.previous ? `<previous_recipe>${strip(JSON.stringify(i.previous))}</previous_recipe>\nThe previous recipe failed on this document; fix it.` : '',
+    i.previous ? `<previous_recipe>${strip(JSON.stringify(i.previous))}</previous_recipe>\n${i.feedback
+      ? 'The owner reviewed the previous recipe and asked for it to be rewritten.' : 'The previous recipe failed on this document; fix it.'}` : '',
+    // The owner's own words (typed in the app, not taken from the document): follow them within the recipe rules.
+    i.feedback ? `<owner_feedback>\n${strip(i.feedback)}\n</owner_feedback>\nThe app's owner wrote the notes above about what went wrong. Follow them as long as they fit the recipe format and rules.` : '',
     `<invoice_text>\n${strip(i.text)}\n</invoice_text>`,
     'Return the recipe JSON object now.',
   ].filter(Boolean).join('\n');
