@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { StorageDestination } from '../core/types.js';
-import { TransientError } from '../core/types.js';
+import type { FolderEntry, StorageDestination } from '../core/types.js';
+import { FolderNotFoundError, TransientError } from '../core/types.js';
 import { getSecret } from '../secrets.js';
 
 const BLOCK = 4 * 1024 * 1024;
@@ -66,6 +66,31 @@ export class DropboxStorage implements StorageDestination {
     if (r.status === 409 && summary(r.body).includes('not_found')) return { exists: false, sameContent: false };
     this.assertOk(r);
     return { exists: true, sameContent: r.body?.content_hash === dropboxContentHash(pdf) };
+  }
+
+  /** Subfolders of `path` ('' or '/' = the top of the Dropbox, or of the app folder), sorted by name. */
+  async listFolders(path: string): Promise<FolderEntry[]> {
+    const p = path.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+    const req = (url: string, body: unknown) => this.call((tok) => this.f(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+    let r = await req('https://api.dropboxapi.com/2/files/list_folder',
+      { path: p === '' ? '' : p.startsWith('/') ? p : `/${p}`, recursive: false, include_deleted: false, limit: 2000 });
+    if (r.status === 409 && /not_found|not_folder/.test(summary(r.body))) throw new FolderNotFoundError(path);
+    const out: FolderEntry[] = [];
+    for (let page = 0; ; page++) {
+      this.assertOk(r);
+      for (const e of r.body?.entries ?? []) {
+        if (e?.['.tag'] === 'folder' && typeof e.name === 'string' && typeof e.path_display === 'string') {
+          out.push({ name: e.name, path: e.path_display });
+        }
+      }
+      if (!r.body?.has_more || page >= 20) break; // 20 pages × 2000 is far beyond any real folder
+      r = await req('https://api.dropboxapi.com/2/files/list_folder/continue', { cursor: r.body.cursor });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name, 'he'));
   }
 
   private assertOk(r: ApiResult): void {

@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import type { ExtractedFields, ItemState, Reason } from '../api.js';
 import {
   Button, Card, ErrorText, Field, fmtDateTime, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
-  StateBadge, stateLabel, useAction, useApp, useLoad,
+  setFlash, StateBadge, stateLabel, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -64,6 +64,13 @@ export default function ItemDetail() {
   const categories = settings!.settings.categories.map((c) => c.name);
 
   const refresh = async (note: string | null) => { await load.reload(); await refreshSummary(); setMsg(note); };
+  /** Done with this document: back to the list (and the spot in it) the user came from, with the outcome. */
+  const leave = async (note: string) => {
+    await refreshSummary();
+    setFlash(note);
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1); else navigate('/attention', { replace: true });
+  };
   const save = (andSend: boolean) => act.run(async () => {
     setMsg(null);
     let valid = item.state === 'ready';
@@ -72,16 +79,16 @@ export default function ItemDetail() {
       setProblems(r.problems);
       valid = r.valid;
     }
-    if (!valid) { await refresh(null); return; }
+    if (!valid) { await refresh(null); return; } // still something to fix: stay here
     if (andSend) {
       try { await api.runWorker(); } catch { /* the worker picks it up on its next tick anyway */ }
-      await refresh(t('item.sent'));
-    } else await refresh(t('item.validSaved'));
+      await leave(t('item.sentNamed', { name: itemTitle(item) }));
+    } else await leave(t('item.savedNamed', { name: itemTitle(item) }));
   });
-  const retry = () => act.run(async () => { await api.retry(item.id); await refresh(t('item.retried')); });
+  const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); });
   const dismiss = () => {
     if (!window.confirm(t('item.dismissConfirm'))) return;
-    void act.run(async () => { await api.dismiss(item.id); await refresh(null); });
+    void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); });
   };
 
   const input = (k: keyof ExtractedFields, extra: { type?: string; ltr?: boolean } = {}) => (

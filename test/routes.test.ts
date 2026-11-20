@@ -7,7 +7,7 @@ import { openDb } from '../server/db.js';
 import { createApp } from '../server/app.js';
 import { apiRouter, backfillJobDone, type ApiContext } from '../server/routes.js';
 import { resetLoginLimiter } from '../server/auth.js';
-import { createEmail, updateItem, createItem, getItem, setItemFields, setItemVendor, transition } from '../server/core/items.js';
+import { createEmail, updateItem, createItem, getItem, setItemFields, setItemText, setItemVendor, transition } from '../server/core/items.js';
 import { recordIngestFailure } from '../server/core/ingestFailures.js';
 import { compileRecipe } from '../server/core/recipe.js';
 import { saveRecipe, getVendor, upsertVendor, setVendorStatus } from '../server/core/recipeStore.js';
@@ -140,6 +140,52 @@ test('ai-always toggles the active recipe flag', async () => {
   const hist = (await (await call('GET', '/api/vendors/demo-cell/recipes')).json()) as any[];
   assert.equal(hist[0].recipe.aiAlways, true);
   assert.equal((await call('PUT', '/api/vendors/nope/ai-always', { value: true })).status, 404);
+});
+
+test('recipe regenerate: drafts from a vendor document with the owner\'s notes, saves nothing', async () => {
+  saveRecipe(compileRecipe(recipeJson()), 'user');
+  const id = item('needs_attention', { total: 118, issueDate: '2026-06-01' }, 'regen');
+  setItemVendor(id, 'demo-cell');
+  setItemText(id, 'סלולר דמו\nתאריך: 01/06/2026\nסה"כ: 118.00');
+  const prompts: string[] = [];
+  const reply = {
+    schemaVersion: 1, vendorKey: 'something-else', displayName: 'x', aiAlways: true,
+    match: { senders: ['billing@demo-cell.co.il'] },
+    fields: {
+      total: { kind: 'regex', pattern: 'סה"כ:\\s*([\\d.,]+)', parse: 'amount' },
+      issueDate: { kind: 'regex', pattern: 'תאריך:\\s*(\\d{2}/\\d{2}/\\d{4})', parse: 'date', dateFormat: 'DD/MM/YYYY' },
+    },
+  };
+  const { call } = await boot({
+    getAi: () => ({ name: 'fake', supportsPdf: false, ping: async () => {}, completeJson: async (r) => { prompts.push(r.user); return reply; } }),
+  });
+  const before = (await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length;
+  const res = await call('POST', '/api/vendors/demo-cell/recipe/regenerate', { itemId: id, comment: 'the total is wrong' });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.reproduces, true);
+  assert.equal(body.recipe.vendorKey, 'demo-cell'); // ours, not the AI's
+  assert.equal(body.recipe.displayName, 'סלולר דמו');
+  assert.equal(body.recipe.aiAlways, undefined); // the vendor's choice, not the AI's
+  assert.match(prompts[0]!, /<owner_feedback>\nthe total is wrong\n<\/owner_feedback>/);
+  assert.match(prompts[0]!, /<previous_recipe>/);
+  assert.equal((await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length, before); // nothing saved
+
+  // Another vendor's document, unknown vendor, no AI.
+  upsertVendor('other', 'אחר');
+  assert.equal((await call('POST', '/api/vendors/other/recipe/regenerate', { itemId: id })).status, 404);
+  assert.equal((await call('POST', '/api/vendors/nope/recipe/regenerate', { itemId: id })).status, 404);
+  const off = await boot({ getAi: () => null });
+  assert.equal((await off.call('POST', '/api/vendors/demo-cell/recipe/regenerate', { itemId: id })).status, 400);
+});
+
+test('items list filters by vendor', async () => {
+  const a = item('needs_attention', {}, 'va');
+  item('needs_attention', {}, 'vb');
+  setItemVendor(a, 'demo-cell');
+  const { call } = await boot();
+  const body = await (await call('GET', '/api/items?vendor=demo-cell')).json();
+  assert.deepEqual(body.items.map((i: { id: string }) => i.id), [a]);
 });
 
 test('manual field edit on a needs_attention item re-validates and moves it to ready', async () => {
@@ -362,6 +408,28 @@ test('malformed JSON -> 400 JSON without a stack; authenticated unknown /api pat
   const nf = await call('GET', '/api/nope/at/all');
   assert.equal(nf.status, 404);
   assert.equal(((await nf.json()) as any).error, 'not_found');
+});
+
+test('GET /api/dropbox/folders lists one level; 404 for a missing folder, 502 on failure, 503 when not connected', async () => {
+  const { FolderNotFoundError } = await import('../server/core/types.js');
+  const asked: string[] = [];
+  const withFolders = (fn: (p: string) => Promise<{ name: string; path: string }[]>) => () => {
+    const d = deps();
+    return { deps: { ...d, storage: { ...d.storage, listFolders: fn } }, gmail };
+  };
+  const { call } = await boot({ getDeps: withFolders(async (p) => { asked.push(p); return [{ name: 'קבלות', path: '/קבלות' }]; }) });
+  const ok = await call('GET', `/api/dropbox/folders?path=${encodeURIComponent('/מסמכים')}`);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { path: '/מסמכים', folders: [{ name: 'קבלות', path: '/קבלות' }] });
+  assert.deepEqual(asked, ['/מסמכים']);
+  const nf = await boot({ getDeps: withFolders(async (p) => { throw new FolderNotFoundError(p); }) });
+  assert.equal((await nf.call('GET', '/api/dropbox/folders?path=/x')).status, 404);
+  const bad = await boot({ getDeps: withFolders(async () => { throw new Error('Dropbox 500 https://x.test/secret'); }) });
+  const r = await bad.call('GET', '/api/dropbox/folders');
+  assert.equal(r.status, 502);
+  assert.deepEqual(await r.json(), { error: 'dropbox_unavailable' });
+  const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
+  assert.equal((await off.call('GET', '/api/dropbox/folders')).status, 503);
 });
 
 test('GET /api/gmail/labels lists labels from the live Gmail source; 503 when not connected or unsupported', async () => {

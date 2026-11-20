@@ -6,3 +6,7 @@ data/
 *.db-*
 data-demo/
 .impeccable/
+
+# SSH keys and OAuth client files never belong in the repo
+*.key
+client_secret_*.json

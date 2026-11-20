@@ -46,6 +46,13 @@ export interface StorageDestination {
   put(folder: string, filename: string, pdf: Buffer): Promise<{ path: string; existed: boolean }>;
   /** `pdf` is the content about to be filed, so the destination can compare hashes for `sameContent`. */
   exists(folder: string, filename: string, pdf: Buffer): Promise<{ exists: boolean; sameContent: boolean }>;
+  /** The folders directly inside `path` ('' = the top), for picking where to file. Read-only. */
+  listFolders?(path: string): Promise<FolderEntry[]>;
+}
+export interface FolderEntry { name: string; path: string }
+/** listFolders: the folder asked for does not exist. */
+export class FolderNotFoundError extends Error {
+  constructor(path: string) { super(`folder not found: ${path}`); this.name = 'FolderNotFoundError'; }
 }
 
 /** Where business expenses are sent (Morning in v1, Task 12). */

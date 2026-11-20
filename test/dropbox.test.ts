@@ -212,3 +212,29 @@ test('oauth callback: unknown state 400; valid state exchanges code once and sto
     assert.equal(again.status, 400);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('listFolders: folders only, sorted, follows has_more; top is ""; a missing folder is FolderNotFoundError', async () => {
+  const { impl, calls } = fakeFetch([
+    () => tokenOk(),
+    () => json(200, { entries: [
+      { '.tag': 'folder', name: 'קבלות', path_display: '/Docs/קבלות' },
+      { '.tag': 'file', name: 'a.pdf', path_display: '/Docs/a.pdf' },
+    ], has_more: true, cursor: 'C1' }),
+    () => json(200, { entries: [{ '.tag': 'folder', name: 'Archive', path_display: '/Docs/Archive' }], has_more: false }),
+  ]);
+  const d = new DropboxStorage({ fetchImpl: impl });
+  assert.deepEqual(await d.listFolders('/Docs/'), [
+    { name: 'קבלות', path: '/Docs/קבלות' }, { name: 'Archive', path: '/Docs/Archive' }, // Hebrew collation: Hebrew first
+  ]);
+  assert.match(calls[1]!.url, /files\/list_folder$/);
+  assert.equal(JSON.parse(String(calls[1]!.init.body)).path, '/Docs');
+  assert.match(calls[2]!.url, /list_folder\/continue$/);
+  assert.equal(JSON.parse(String(calls[2]!.init.body)).cursor, 'C1');
+
+  const top = fakeFetch([() => tokenOk(), () => json(200, { entries: [], has_more: false })]);
+  await new DropboxStorage({ fetchImpl: top.impl }).listFolders('');
+  assert.equal(JSON.parse(String(top.calls[1]!.init.body)).path, '');
+
+  const missing = fakeFetch([() => tokenOk(), () => json(409, { error_summary: 'path/not_found/..' })]);
+  await assert.rejects(new DropboxStorage({ fetchImpl: missing.impl }).listFolders('/nope'), (e: Error) => e.name === 'FolderNotFoundError');
+});

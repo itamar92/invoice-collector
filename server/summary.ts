@@ -37,6 +37,10 @@ export function summary(now: Date) {
     awaitingVendor,
     awaitingBackfillApproval,
     waitingAi: count('waiting_ai'),
+    // Not filed yet, so not on the summary page: shown there with the step each one waits for.
+    needsAttention,
+    backfillWaiting: count('awaiting_backfill_approval'),
+    inProgress: count('queued') + count('ready'),
     worthALook: db.prepare('SELECT COUNT(*) FROM items WHERE recipe_failed = 1 AND updated_at >= ?').pluck()
       .get(worthSince(now)) as number,
     missedOpen: listMissed('open').length,

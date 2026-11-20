@@ -1,13 +1,67 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api.js';
-import type { RecipeVersion, Vendor, VendorStatus } from '../api.js';
+import type { Item, RecipeVersion, Vendor, VendorStatus } from '../api.js';
 import {
-  Avatar, Button, Card, Empty, ErrorText, fmtDateTime, hintCls, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
+  Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const STATUSES: VendorStatus[] = ['unreviewed', 'business', 'personal', 'ignored'];
+
+const docLabel = (i: Item) => `${fmtDate(i.fields?.issueDate ?? i.createdAt)} · ${fmtMoney(i.fields?.total, i.fields?.currency)} · ${i.attachmentName ?? itemTitle(i)}`;
+
+/**
+ * Sends one of the vendor's documents and the owner's notes to the AI, which writes a new recipe. The draft lands
+ * in the editor below; nothing is saved until the owner presses save.
+ */
+function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json: string) => void }) {
+  const docs = useLoad(() => api.items({ vendor: vendor.key, limit: 50 }), [vendor.key]);
+  const usable = (docs.data?.items ?? []).filter((i) => i.fields && i.hasText);
+  const [itemId, setItemId] = useState('');
+  const [comment, setComment] = useState('');
+  const [result, setResult] = useState<boolean | null>(null);
+  const act = useAction();
+  const chosen = itemId || usable[0]?.id || '';
+
+  const run = () => act.run(async () => {
+    setResult(null);
+    const r = await api.regenerateRecipe(vendor.key, chosen, comment);
+    onDraft(JSON.stringify(r.recipe, null, 2));
+    setResult(r.reproduces);
+  });
+
+  return (
+    <div className="space-y-2 rounded-xl border border-line bg-white p-3">
+      <div className="text-sm font-semibold">{t('vendors.regen.title')}</div>
+      <p className={hintCls}>{t('vendors.regen.hint')}</p>
+      {docs.loading && !docs.data ? <Loading /> : usable.length === 0 ? <p className="text-sm text-muted">{t('vendors.regen.noDocs')}</p> : (
+        <>
+          <label className="block text-xs">
+            <span className="mb-0.5 block font-semibold text-muted">{t('vendors.regen.doc')}</span>
+            <div className="flex items-center gap-2">
+              <select className={inputCls} value={chosen} onChange={(e) => setItemId(e.target.value)}>
+                {usable.map((i) => <option key={i.id} value={i.id}>{docLabel(i)}</option>)}
+              </select>
+              <Link to={`/items/${chosen}`} className="shrink-0 text-sm font-semibold text-accent underline">{t('vendors.regen.open')}</Link>
+            </div>
+          </label>
+          <label className="block text-xs">
+            <span className="mb-0.5 block font-semibold text-muted">{t('vendors.regen.comment')}</span>
+            <textarea className={`${inputCls} h-24 py-2`} value={comment} maxLength={2000}
+              placeholder={t('vendors.regen.placeholder')} onChange={(e) => setComment(e.target.value)} />
+          </label>
+          <Button variant="secondary" disabled={act.busy || !chosen} onClick={run}>
+            {act.busy ? t('vendors.regen.running') : t('vendors.regen.run')}
+          </Button>
+          {result !== null && <Notice tone={result ? 'ok' : 'warn'}>{result ? t('vendors.regen.ok') : t('vendors.regen.miss')}</Notice>}
+          <ErrorText>{act.error}</ErrorText>
+        </>
+      )}
+    </div>
+  );
+}
 
 function RecipeEditor({ vendor }: { vendor: Vendor }) {
   const history = useLoad(() => api.recipes(vendor.key), [vendor.key]);
@@ -37,6 +91,7 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
           </label>
         )
         : <p className="text-sm text-muted">{t('vendors.noRecipe')}</p>}
+      <RegenerateRecipe vendor={vendor} onDraft={(json) => { setText(json); setSaved(false); }} />
       <div>
         <p className={`mb-1 ${hintCls}`}>{t('vendors.recipeHint')}</p>
         <textarea aria-label={t('vendors.recipeHint')} className={`${inputCls} ltr h-64 font-mono text-xs`} spellCheck={false} value={value}

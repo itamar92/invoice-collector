@@ -8,6 +8,8 @@ export type { Category, ExtractedFields, ItemState, Reason, SecretKey, Settings,
 
 export interface Summary {
   attention: number; awaitingVendor: number; awaitingBackfillApproval: number; waitingAi: number; worthALook: number; missedOpen: number;
+  /** Not filed yet: needs a fix / first-import approval (any time) / still being read or filed. */
+  needsAttention: number; backfillWaiting: number; inProgress: number;
   ingestFailures: number; lastTickAt: string | null; lastTickError: string | null; lastAiSuccessAt: string | null;
 }
 
@@ -16,6 +18,8 @@ export interface Item {
   reason: Reason | null; fields: ExtractedFields | null; provenance: 'recipe' | 'ai' | 'manual' | null;
   vendorKey: string | null; recipeFailed: boolean; storagePath: string | null; accountingRef: string | null;
   accountingMode: string | null; attempts: number; createdAt: string; updatedAt: string;
+  /** Lists only: the document's text was extracted (a recipe can be written from it). */
+  hasText?: boolean;
 }
 export interface ItemEvent { at: string; from: string | null; to: string; note: string | null }
 /** emailMode 'backfill': the item can be filed but is never sent to Morning, so the UI offers no "send". */
@@ -97,9 +101,10 @@ export const api = {
   stats: (year?: number) => get<Stats>(`/api/stats${year ? `?year=${year}` : ''}`),
   runWorker: () => send<Summary>('POST', '/api/worker/run'),
 
-  items: (q: { state?: ItemState; q?: string; worth?: boolean; limit?: number; offset?: number } = {}) => {
+  items: (q: { state?: ItemState; q?: string; worth?: boolean; vendor?: string; limit?: number; offset?: number } = {}) => {
     const p = new URLSearchParams();
     if (q.state) p.set('state', q.state);
+    if (q.vendor) p.set('vendor', q.vendor);
     if (q.q) p.set('q', q.q);
     if (q.worth) p.set('worth', '1');
     p.set('limit', String(q.limit ?? 50));
@@ -122,6 +127,9 @@ export const api = {
     send<{ vendor: Vendor; touched: string[]; processed: boolean }>('PUT', `/api/vendors/${enc(key)}`, patch),
   recipes: (key: string) => get<RecipeVersion[]>(`/api/vendors/${enc(key)}/recipes`),
   saveRecipe: (key: string, recipe: unknown) => send<{ ok: true; id: number }>('PUT', `/api/vendors/${enc(key)}/recipe`, recipe),
+  /** An AI-written draft of the vendor's recipe from one of its documents; not saved. */
+  regenerateRecipe: (key: string, itemId: string, comment: string) =>
+    send<{ recipe: Record<string, unknown>; reproduces: boolean }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
   setAiAlways: (key: string, value: boolean) => send<{ ok: true }>('PUT', `/api/vendors/${enc(key)}/ai-always`, { value }),
 
   backfill: () => get<BackfillStatus>('/api/backfill'),
@@ -148,6 +156,8 @@ export const api = {
   testAi: () => send<{ ok: boolean; provider: string; error?: string }>('POST', '/api/ai/test'),
   detectMorning: () => send<{ modes: MorningModes; verified: false }>('POST', '/api/morning/detect'),
   morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),
+  /** Subfolders of a Dropbox path ('' = the top). 404 folder_not_found when it does not exist. */
+  dropboxFolders: (path: string) => get<{ path: string; folders: { name: string; path: string }[] }>(`/api/dropbox/folders?path=${enc(path)}`),
   gmailLabels: () => get<{ labels: string[] }>('/api/gmail/labels'),
 };
 

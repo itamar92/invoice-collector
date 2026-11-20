@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildFilename, buildFolder } from '../../server/core/naming.js';
 import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
+import { mergeMorningCategories } from '../morningCategories.js';
+import { FolderPicker } from './FolderPicker.js';
 import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -326,6 +328,13 @@ export function CategoriesSection() {
   const names = cats.map((c) => c.name.trim());
   const valid = names.every(Boolean) && new Set(names).size === names.length && folderT.trim() && fileT.trim();
   const setCat = (i: number, patch: Partial<Category>) => { setCats(cats.map((c, j) => (j === i ? { ...c, ...patch } : c))); setSaved(false); };
+  const [fromMorning, setFromMorning] = useState<number | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const useMorning = () => {
+    if (morning.list.state !== 'ok') return;
+    const r = mergeMorningCategories(cats, morning.list.items);
+    setCats(r.cats); setFromMorning(r.added); setSaved(false);
+  };
   const add = () => { if (!newName.trim() || names.includes(newName.trim())) return; setCats([...cats, { name: newName.trim(), sendToAccounting: true }]); setNewName(''); setSaved(false); };
 
   const doSave = () => saving.run(async () => {
@@ -341,6 +350,18 @@ export function CategoriesSection() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">{t('cat.intro')}</p>
+      {morning.list.state === 'ok' && morning.list.items.length > 0 && (
+        <div className="space-y-2 rounded-xl bg-ground p-3">
+          <div className="text-sm font-semibold">{t('cat.fromMorning.title')}</div>
+          <p className={hintCls}>{t('cat.fromMorning.hint', { n: morning.list.items.length })}</p>
+          <Button variant="secondary" className="bg-white" onClick={useMorning}>{t('cat.fromMorning.button')}</Button>
+          {fromMorning !== null && (
+            <Notice tone={fromMorning > 0 ? 'ok' : 'info'}>
+              {fromMorning > 0 ? t('cat.fromMorning.added', { n: fromMorning }) : t('cat.fromMorning.none')}
+            </Notice>
+          )}
+        </div>
+      )}
       <div className="-mx-4 overflow-x-auto px-4">
         <table className="w-full min-w-[32rem] text-sm">
           <thead><tr>
@@ -375,9 +396,21 @@ export function CategoriesSection() {
       </div>
 
       <div className="grid gap-3">
-        <Field label={t('cat.root')} hint={t('cat.rootHint')}>
-          <input className={`${inputCls} ltr`} value={root} onChange={(e) => { setRoot(e.target.value); setSaved(false); }} />
-        </Field>
+        <div>
+          <Field label={t('cat.root')} hint={t('cat.rootHint')}>
+            <input className={`${inputCls} ltr`} value={root} onChange={(e) => { setRoot(e.target.value); setSaved(false); }} />
+          </Field>
+          {/* Outside the label: its buttons must not focus the input. */}
+          <div className="mt-2">
+            {browsing
+              ? <FolderPicker value={root} onPick={(p) => { setRoot(p); setSaved(false); }} onClose={() => setBrowsing(false)} />
+              : (
+                <Button variant="secondary" disabled={!s.secrets.dropbox_refresh} onClick={() => setBrowsing(true)}>
+                  <Icon name="folder" />{t('folders.browse')}
+                </Button>
+              )}
+          </div>
+        </div>
         <Field label={t('cat.folderTemplate')}>
           <input className={`${inputCls} ltr font-mono`} value={folderT} onChange={(e) => { setFolderT(e.target.value); setSaved(false); }} />
         </Field>

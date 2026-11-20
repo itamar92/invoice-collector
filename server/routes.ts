@@ -1,7 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { z, ZodError } from 'zod';
-import { getAiProvider } from './ai/provider.js';
+import { AiOutputError, AiUnavailableError, aiWriteRecipe, getAiProvider, reproduces } from './ai/provider.js';
 import type { AiProvider } from './ai/provider.js';
 import { requireUser } from './auth.js';
 import {
@@ -9,7 +9,7 @@ import {
 } from './core/backfill.js';
 import { listIngestFailures } from './core/ingestFailures.js';
 import {
-  getEmail, getItem, getItemPdf, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
+  getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
 import { setVendorDecision, vendorKeyFor } from './core/pipeline.js';
@@ -18,6 +18,7 @@ import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
 import type { Item } from './core/items.js';
+import { FolderNotFoundError } from './core/types.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
@@ -90,6 +91,7 @@ const ListQuery = z.object({
   state: z.enum(ITEM_STATES).optional(),
   q: z.string().max(200).optional(),
   worth: z.enum(['1']).optional(),
+  vendor: z.string().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -142,6 +144,12 @@ function eventsOf(itemId: string) {
   return rows.map((e) => ({ at: e.at, from: e.from_state, to: e.to_state, note: sanitizeError(e.note) }));
 }
 
+/** 'Name <A@B.co>' → 'a@b.co'. */
+function bareAddress(s: string): string {
+  const m = /<([^<>]+)>/.exec(s);
+  return (m?.[1] ?? s).trim().toLowerCase();
+}
+
 function publicSettings(s: Settings) {
   return { ...s, lastTickError: sanitizeError(s.lastTickError), backfillError: sanitizeError(s.backfillError) };
 }
@@ -183,10 +191,10 @@ export function apiRouter(ctx: ApiContext): express.Router {
         .all(worthSince(clock())) as string[])
       : null;
     const items = (worthIds
-      ? listItems({ state: q.state, q: q.q || undefined, limit: 100_000 }).filter((i) => worthIds.has(i.id))
+      ? listItems({ state: q.state, q: q.q || undefined, vendorKey: q.vendor, limit: 100_000 }).filter((i) => worthIds.has(i.id))
         .slice(q.offset, q.offset + q.limit)
-      : listItems({ state: q.state, q: q.q || undefined, limit: q.limit, offset: q.offset }))
-      .map(({ text: _text, ...rest }) => rest);
+      : listItems({ state: q.state, q: q.q || undefined, vendorKey: q.vendor, limit: q.limit, offset: q.offset }))
+      .map(({ text, ...rest }) => ({ ...rest, hasText: !!text?.trim() }));
     res.json({ items, limit: q.limit, offset: q.offset });
   }));
 
@@ -341,6 +349,38 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ ok: true, id: saveRecipe(recipe, 'user') });
   }));
 
+  // The AI rewrites the vendor's recipe from one of its documents, guided by the owner's notes. Nothing is
+  // saved: the draft goes back to the editor, and the owner saves it (or not) like a hand-edited recipe.
+  const Regenerate = z.object({ itemId: z.string().min(1), comment: z.string().trim().max(2000).default('') }).strict();
+  r.post('/vendors/:key/recipe/regenerate', wrap(async (req, res) => {
+    const key = param(req, 'key');
+    const { itemId, comment } = parse(Regenerate, req.body);
+    const vendor = getVendor(key);
+    if (!vendor) throw notFound('vendor');
+    const item = getItem(itemId);
+    if (!item || item.vendorKey !== key) throw notFound('item');
+    if (!item.text?.trim() || !item.fields) throw new HttpError(409, 'item_not_readable');
+    const ai = ctx.getAi ? ctx.getAi() : getAiProvider(getSettings());
+    if (!ai) throw new HttpError(400, 'ai_not_configured');
+    const previous = getActiveRecipe(key) ?? undefined;
+    const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
+    let draft;
+    try {
+      draft = await aiWriteRecipe(ai, { text: item.text, sender, fields: item.fields, previous, feedback: comment || undefined });
+    } catch (e) {
+      if (e instanceof AiUnavailableError) throw new HttpError(503, 'ai_unavailable');
+      if (e instanceof AiOutputError) throw new HttpError(502, 'ai_bad_recipe');
+      throw e;
+    }
+    // Ours, not the AI's: the key and name, and the vendor's AI-always choice (a miss is reported, not applied).
+    const { aiAlways: _drop, ...rest } = draft;
+    const recipe = compileRecipe({
+      ...rest, vendorKey: key, displayName: previous?.displayName ?? vendor.displayName,
+      ...(previous?.aiAlways ? { aiAlways: true } : {}),
+    });
+    res.json({ recipe, reproduces: reproduces(recipe, item.text, item.fields) });
+  }));
+
   r.put('/vendors/:key/ai-always', wrap((req, res) => {
     const key = param(req, 'key');
     const { value } = parse(z.object({ value: z.boolean() }).strict(), req.body);
@@ -417,6 +457,20 @@ export function apiRouter(ctx: ApiContext): express.Router {
       throw new HttpError(502, 'gmail_unavailable'); // the UI falls back to typing the label name
     }
     res.json({ labels });
+  }));
+
+  // ---------- dropbox ----------
+  // Folder browser for the storage root: read-only, one level at a time.
+  r.get('/dropbox/folders', wrap(async (req, res) => {
+    const { path } = parse(z.object({ path: z.string().max(1000).default('') }), req.query);
+    const { storage } = live().deps;
+    if (!storage.listFolders) throw new HttpError(503, 'not_connected');
+    try {
+      res.json({ path, folders: await storage.listFolders(path) });
+    } catch (e) {
+      if (e instanceof FolderNotFoundError) throw new HttpError(404, 'folder_not_found');
+      throw new HttpError(502, 'dropbox_unavailable');
+    }
   }));
 
   // ---------- settings & secrets ----------

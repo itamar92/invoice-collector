@@ -1,0 +1,37 @@
+# Oracle Cloud (OCI) deployment: the app plus a Cloudflare Tunnel. No inbound ports needed on the VM.
+# Used by deploy/deploy-oci.sh, which copies it to the repo root on the VM as docker-compose.yml.
+# Set TUNNEL_TOKEN in .env (Cloudflare Zero Trust -> Networks -> Tunnels -> your tunnel -> Docker token).
+# In the tunnel's Public Hostname, point your hostname at: http://invoice-collector:3100
+services:
+  invoice-collector:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: invoice-collector:latest
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "3100"
+      TRUST_PROXY: "1"
+    # The VM itself, for the SSH AI agent (Settings host: host.docker.internal).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - invoice-data:/data
+    ports:
+      # Localhost only, for checks from the VM itself (curl http://127.0.0.1:3100/healthz).
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # --url covers tunnels created with the cloudflared CLI; dashboard-managed tunnels use their own routes.
+    command: tunnel --no-autoupdate run --url http://invoice-collector:3100
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - invoice-collector
+    restart: unless-stopped
+
+volumes:
+  invoice-data:

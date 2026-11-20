@@ -11,7 +11,7 @@ import { t } from '../i18n/he.js';
 
 /** First-run list (spec §4.5): approve → filed to Dropbox only. The UI offers no way to send these to Morning. */
 export default function Backfill() {
-  const { settings, setSettings, refreshSummary, refreshSettings } = useApp();
+  const { settings, summary, setSettings, refreshSummary, refreshSettings } = useApp();
   const list = useLoad(() => api.backfill());
   const running = !!list.data?.running;
   const wasRunning = useRef(false);
@@ -85,6 +85,10 @@ export default function Backfill() {
         })}</Notice>
       )}
 
+      {!done && !notConnected && rows.length > 0 && (
+        <NextSteps step={(summary?.awaitingVendor ?? 0) > 0 ? 1 : approvable.length > 0 ? 2 : 3} />
+      )}
+
       <VendorDecisions onDecided={() => void list.reload()} />
 
       <section className="panel">
@@ -108,6 +112,32 @@ export default function Backfill() {
           : <ul>{rows.map((r) => <Row key={r.id} r={r} checked={picked.has(r.id)} onToggle={() => toggle(r.id)} />)}</ul>}
       </section>
     </div>
+  );
+}
+
+const STEPS = ['backfill.step1', 'backfill.step2', 'backfill.step3'] as const;
+
+/** What to do with the list, in order, with the current step marked: the summary page fills only after step 2. */
+function NextSteps({ step }: { step: 1 | 2 | 3 }) {
+  return (
+    <section className="panel" aria-labelledby="backfill-steps">
+      <h2 id="backfill-steps" className="display mb-2 text-lg">{t('backfill.stepsTitle')}</h2>
+      <ol className="space-y-2">
+        {STEPS.map((k, i) => {
+          const n = i + 1;
+          const state = n < step ? 'done' : n === step ? 'now' : 'later';
+          return (
+            <li key={k} aria-current={state === 'now' ? 'step' : undefined}
+              className={`flex items-start gap-3 rounded-xl px-2 py-1.5 text-sm ${state === 'now' ? 'bg-accent-tint font-semibold' : state === 'done' ? 'text-muted' : ''}`}>
+              <span className={`grid size-6 shrink-0 place-items-center rounded-full text-xs font-bold ${state === 'now' ? 'bg-accent text-white' : state === 'done' ? 'bg-ok-tint text-accent-deep' : 'bg-ground-deep'}`}>
+                {state === 'done' ? '✓' : n}
+              </span>
+              <span className="pt-0.5">{t(k)}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

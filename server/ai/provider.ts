@@ -162,7 +162,8 @@ export function aiExtract(
   );
 }
 
-function reproduces(r: Recipe, text: string, f: ExtractedFields): boolean {
+/** The recipe reads the same date and total from the text as the given (correct) fields. */
+export function reproduces(r: Recipe, text: string, f: ExtractedFields): boolean {
   const got = runRecipe(r, text);
   return got.issueDate === f.issueDate && got.total === f.total;
 }
@@ -173,7 +174,7 @@ function reproduces(r: Recipe, text: string, f: ExtractedFields): boolean {
  */
 export async function aiWriteRecipe(
   p: AiProvider,
-  input: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe },
+  input: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe; feedback?: string },
 ): Promise<Recipe> {
   const validate = (raw: unknown): Recipe => {
     let r: Recipe;

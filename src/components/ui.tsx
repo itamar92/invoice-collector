@@ -20,6 +20,12 @@ export function useApp(): AppState {
   return v;
 }
 
+// ---------- one-shot message for the next page ----------
+/** A note shown once on the page the user lands on next (e.g. "saved" after leaving a document). */
+let flash: string | null = null;
+export function setFlash(msg: string | null): void { flash = msg; }
+export function takeFlash(): string | null { const m = flash; flash = null; return m; }
+
 // ---------- data loading ----------
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -107,6 +113,7 @@ const ICONS = {
   up: <path d="m5.5 12 4.5-4.5 4.5 4.5" />,
   out: <><path d="M8.5 5H15v6.5" /><path d="M15 5 6 14" /></>,
   back: <path d="M4 10h12M11.5 5.5 16 10l-4.5 4.5" />,
+  folder: <path d="M3.5 6a1 1 0 0 1 1-1h3.6l1.6 1.8h5.8a1 1 0 0 1 1 1V14.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />,
   camera: <><path d="M3.5 7.5a1 1 0 0 1 1-1h2l1.2-2h4.6l1.2 2h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /><circle cx="10" cy="10.8" r="2.6" /></>,
 } as const;
 export type IconName = keyof typeof ICONS;
@@ -132,9 +139,9 @@ export function Avatar({ name }: { name: string }) {
 
 // ---------- sections ----------
 /** A white rounded panel with an optional heading row. */
-export function Card({ title, children, actions, className = '' }: { title?: ReactNode; children: ReactNode; actions?: ReactNode; className?: string }) {
+export function Card({ title, children, actions, className = '', id }: { title?: ReactNode; children: ReactNode; actions?: ReactNode; className?: string; id?: string }) {
   return (
-    <section className={`panel ${className}`}>
+    <section id={id} className={`panel ${className}`}>
       {(title || actions) && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           {title && <h2 className="display text-lg">{title}</h2>}

@@ -23,7 +23,7 @@ export interface ItemPatch {
 }
 
 export interface ItemFilter {
-  state?: ItemState | ItemState[]; messageId?: string; limit?: number; offset?: number; q?: string;
+  state?: ItemState | ItemState[]; messageId?: string; limit?: number; offset?: number; q?: string; vendorKey?: string;
 }
 
 const now = () => new Date().toISOString();
@@ -172,6 +172,7 @@ export function listItems(filter: ItemFilter = {}): Item[] {
     args.push(...states);
   }
   if (filter.messageId) { where.push('message_id = ?'); args.push(filter.messageId); }
+  if (filter.vendorKey) { where.push('vendor_key = ?'); args.push(filter.vendorKey); }
   if (filter.q) {
     const like = `%${filter.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     where.push(`(attachment_name LIKE ? ESCAPE '\\' OR vendor_key LIKE ? ESCAPE '\\' OR fields_json LIKE ? ESCAPE '\\')`);

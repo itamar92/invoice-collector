@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Item, Vendor, VendorStatus } from '../api.js';
@@ -17,10 +18,11 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
   const { refreshSummary } = useApp();
   const load = useLoad(async () => {
     const [vendors, waiting] = await Promise.all([api.vendors(), api.items({ state: 'awaiting_vendor', limit: 200 })]);
-    const counts = new Map<string, number>();
-    for (const i of waiting.items) if (i.vendorKey) counts.set(i.vendorKey, (counts.get(i.vendorKey) ?? 0) + 1);
-    return vendors.filter((v) => v.status === 'unreviewed' && counts.has(v.key)).map((v) => ({ v, n: counts.get(v.key)! }));
+    const byVendor = new Map<string, Item[]>();
+    for (const i of waiting.items) if (i.vendorKey) byVendor.set(i.vendorKey, [...(byVendor.get(i.vendorKey) ?? []), i]);
+    return vendors.filter((v) => v.status === 'unreviewed' && byVendor.has(v.key)).map((v) => ({ v, items: byVendor.get(v.key)! }));
   });
+  const [open, setOpen] = useState<string | null>(null);
   const act = useAction();
   const decide = (v: Vendor, status: VendorStatus) => act.run(async () => {
     await api.setVendor(v.key, { status });
@@ -32,15 +34,21 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
     <Card title={t('attention.newVendors')}>
       <p className="text-[13px] text-muted">{t('attention.newVendorsHint')}</p>
       <ul>
-        {load.data.map(({ v, n }) => (
+        {load.data.map(({ v, items }) => (
           <li key={v.key} className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 py-3 ${rowCls}`}>
-            <div className="flex min-w-0 items-center gap-3">
+            {/* The vendor opens its waiting documents, so the decision can be made after a look at them. */}
+            <button type="button" aria-expanded={open === v.key} aria-controls={`vendor-docs-${v.key}`}
+              onClick={() => setOpen(open === v.key ? null : v.key)}
+              className="-mx-2 flex min-w-0 items-center gap-3 rounded-xl px-2 py-1 text-start transition-colors hover:bg-ground">
               <Avatar name={v.displayName} />
-              <div className="min-w-0">
-                <div className="font-semibold">{v.displayName}</div>
-                <div className="text-[13px] text-muted">{t('attention.waitingItems', { n })}</div>
-              </div>
-            </div>
+              <span className="min-w-0">
+                <span className="block font-semibold">{v.displayName}</span>
+                <span className="flex items-center gap-1 text-[13px] text-accent-deep underline decoration-dotted underline-offset-2">
+                  {t('attention.waitingItems', { n: items.length })}
+                  <Icon name={open === v.key ? 'up' : 'down'} className="size-3.5" />
+                </span>
+              </span>
+            </button>
             {/* The discarding choice stands apart from the two that keep the documents. */}
             <div className="flex w-full gap-2 sm:w-auto">
               {DECISIONS.map((s) => (
@@ -51,6 +59,11 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
                 </Button>
               ))}
             </div>
+            {open === v.key && (
+              <div id={`vendor-docs-${v.key}`} className="w-full rounded-xl border border-line px-3 py-1">
+                <ItemList items={items} />
+              </div>
+            )}
           </li>
         ))}
       </ul>
