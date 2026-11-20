@@ -70,6 +70,8 @@ Now edit it and fill in PUBLIC_URL, TUNNEL_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIEN
 See your login password with:  ssh $TARGET 'grep APP_PASSWORD ~/$REMOTE_DIR/.env'
 Back up SECRET_KEY somewhere safe. Then run this script again.
 MSG
+  # In CI (GitHub Actions) nothing was deployed, so the run must not look green.
+  if [ -n "${CI:-}" ]; then echo "::error::No .env on the VM yet: run deploy/deploy-oci.sh once from your Mac first."; exit 1; fi
   exit 0
 fi
 
