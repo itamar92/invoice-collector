@@ -29,6 +29,31 @@ docker buildx build --platform linux/arm64,linux/amd64 -f deploy/Dockerfile -t i
 
 Add `--push` with a registry tag to publish the image, or `--load` with a single `--platform` to load it locally.
 
+### On an Oracle Cloud (OCI) VM
+
+`deploy/deploy-oci.sh` does the whole thing from your Mac over SSH: installs Docker on the VM, copies the repo,
+creates `.env` with generated secrets, builds the image on the VM and starts the app together with a Cloudflare
+Tunnel (`deploy/docker-compose.oci.yml`). No inbound ports have to be opened in the OCI security list.
+
+1. Create the instance: shape **VM.Standard.A1.Flex** (Ampere, free tier; 1 OCPU / 6 GB is plenty), image
+   Ubuntu 24.04 or Oracle Linux 9, and add your SSH public key. The 1 GB E2.1.Micro shape is too small to build
+   the native modules.
+2. In Cloudflare Zero Trust, Networks, Tunnels: create a tunnel (connector type Docker), copy its token, and add a
+   Public Hostname (e.g. `invoices.example.com`) with service `http://invoice-collector:3100`.
+3. First run creates `.env` on the VM and stops:
+
+   ```sh
+   ./deploy/deploy-oci.sh ubuntu@<vm-public-ip>
+   ```
+
+4. Fill in `PUBLIC_URL` (the tunnel hostname), `TUNNEL_TOKEN`, and the Google and Dropbox values
+   (`ssh -t ubuntu@<vm-public-ip> 'nano ~/invoice-collector/.env'`), then run the script again. It builds, starts and
+   waits for `/healthz`.
+5. Register the OAuth redirect URIs for `PUBLIC_URL` (sections 2 and 3) and add Cloudflare Access (section 7).
+
+Re-run the script to ship new code; `.env` and the data volume are kept. Back up `SECRET_KEY` and the
+`invoice-data` volume (`docker run --rm -v invoice-collector_invoice-data:/d -v $PWD:/b alpine tar czf /b/data.tgz -C /d .`).
+
 ## 2. Google (Gmail API)
 
 1. In the [Google Cloud Console](https://console.cloud.google.com/) create a project and enable the **Gmail API**.
