@@ -115,6 +115,8 @@ const ICONS = {
   back: <path d="M4 10h12M11.5 5.5 16 10l-4.5 4.5" />,
   folder: <path d="M3.5 6a1 1 0 0 1 1-1h3.6l1.6 1.8h5.8a1 1 0 0 1 1 1V14.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />,
   camera: <><path d="M3.5 7.5a1 1 0 0 1 1-1h2l1.2-2h4.6l1.2 2h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /><circle cx="10" cy="10.8" r="2.6" /></>,
+  share: <><path d="M10 3v9M6.5 6.5 10 3l3.5 3.5" /><path d="M7 9H5.5a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H13" /></>,
+  addHome: <><rect x="3.5" y="3.5" width="13" height="13" rx="3" /><path d="M10 7v6M7 10h6" /></>,
 } as const;
 export type IconName = keyof typeof ICONS;
 export function Icon({ name, className = '' }: { name: IconName; className?: string }) {

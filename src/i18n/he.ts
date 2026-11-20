@@ -58,6 +58,16 @@ export const he = {
   'app.error': 'משהו השתבש',
   'app.retry': 'נסו שוב',
 
+  // add to home screen
+  'install.title': 'הוספה למסך הבית',
+  'install.body': 'פתיחה בלחיצה אחת, כמו אפליקציה.',
+  'install.button': 'הוספה',
+  'install.menu': 'הוספה למסך הבית',
+  'install.dismiss': 'לא עכשיו',
+  'install.ios.step1': 'לוחצים על כפתור השיתוף בסרגל של Safari',
+  'install.ios.step2': 'בוחרים „הוספה למסך הבית״',
+  'install.ios.done': 'הבנתי',
+
   // login
   'login.title': 'כניסה',
   'login.password': 'סיסמה',

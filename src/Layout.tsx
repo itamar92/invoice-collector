@@ -4,6 +4,7 @@ import { api, GMAIL_SEND_SCOPE } from './api.js';
 import type { SettingsResponse } from './api.js';
 import { Button, CountBadge, ErrorText, fmtDateTime, Icon, Notice, takeFlash, useAction, useApp } from './components/ui.js';
 import { useUploadReceipt } from './components/UploadReceipt.js';
+import { InstallBanner, useInstallApp } from './components/InstallApp.js';
 import type { IconName } from './components/ui.js';
 import { t } from './i18n/he.js';
 import type { MessageKey } from './i18n/he.js';
@@ -84,6 +85,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
   const loc = useLocation();
   const run = useAction();
   const upload = useUploadReceipt();
+  const install = useInstallApp();
   const problems = settings ? connectionProblems(settings) : [];
   const active = !!settings?.settings.setupComplete && !!settings?.settings.backfillDone;
   const inMore = MORE.some((n) => loc.pathname.startsWith(n.to));
@@ -135,6 +137,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         </div>
       </header>
       {upload.input}
+      {install.sheet}
 
       {/* desktop: rail on the start (right) side */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-e border-line p-4 md:flex">
@@ -152,6 +155,12 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <Button className="mx-2 mt-4 shadow-soft" disabled={upload.busy} onClick={upload.pick}>
           <Icon name="camera" />{t('upload.button')}
         </Button>
+        {install.available && (
+          <button type="button" onClick={() => void install.install()}
+            className="mx-2 mt-2 flex min-h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold text-accent hover:bg-accent-tint">
+            <Icon name="addHome" />{t('install.menu')}
+          </button>
+        )}
         <div className="mt-auto space-y-2 px-2 text-xs text-muted">
           <p>{lastRun}</p>
           {!active && <p>{t('worker.notActive')}</p>}
@@ -165,6 +174,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       <main className="min-w-0 flex-1 px-4 pb-28 pt-4 md:p-8">
         <div className="mx-auto max-w-4xl space-y-4">
           <p className="text-xs text-muted md:hidden">{lastRun}</p>
+          <div className="md:hidden"><InstallBanner install={install} /></div>
           <ErrorText>{run.error}</ErrorText>
           {flash && <div role="status" className="sticky top-16 z-20 md:top-4"><Notice tone="ok">{flash}</Notice></div>}
           {upload.busy && <Notice>{t('upload.busy')}</Notice>}
@@ -191,6 +201,11 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
                 <Icon name={n.icon} />{t(n.key)}
               </NavLink>
             ))}
+            {install.available && (
+              <button type="button" onClick={() => { setOpen(false); void install.install(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 font-medium">
+                <Icon name="addHome" />{t('install.menu')}
+              </button>
+            )}
             <button type="button" onClick={() => void logout()} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 font-medium">
               <Icon name="out" />{t('logout')}
             </button>
