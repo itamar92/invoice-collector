@@ -19,7 +19,7 @@ function loadImage(file: File): Promise<HTMLImageElement> {
 
 /**
  * What is sent for a picked file: a PDF as it is; any image the browser can show (JPEG, PNG, HEIC on iPhone)
- * redrawn upright as a JPEG, scaled down when huge. The server accepts only PDF and JPEG.
+ * redrawn upright as a JPEG, scaled down when huge. The server accepts PDF, JPEG and PNG.
  */
 async function prepare(file: File): Promise<Blob> {
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return file;
