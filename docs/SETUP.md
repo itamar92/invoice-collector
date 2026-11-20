@@ -130,15 +130,61 @@ The app can run a CLI agent on a separate host over SSH. The pattern:
   app's container.
 - The app has its own SSH key (stored encrypted). On the agent host, `authorized_keys` pins that key to a
   **forced command** (a small wrapper script) with `no-port-forwarding,no-agent-forwarding,no-X11-forwarding`.
-- The wrapper never executes the caller's request; it only matches it against the two things the app asks for
-  (a `--version` probe and the analysis run) and runs a fixed command. The prompt arrives on **stdin**, never on a
-  command line.
+- The wrapper never executes the caller's request; it only matches it against the three things the app asks for
+  (a `--version` probe, a text analysis, and a document analysis) and runs a fixed command. The prompt arrives on
+  **stdin**, never on a command line.
 - The host key is **pinned**: the app stores the SHA-256 fingerprint of the host key and refuses any other.
 
-A reference implementation of the forced-command wrapper and its installer is the
-`deploy/claude-agent.sh` pattern in the author's separate `account-manager` project; reproduce the same
-structure on your agent host. In Settings choose mode `ssh`, and enter host, port, user, and host-key
-fingerprint (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`).
+`deploy/ic-agent.sh` is that wrapper for Claude Code. Install it root-owned (so the key cannot change what it
+runs) and pin the app's public key to it in the agent user's `authorized_keys`:
+
+```
+command="/home/aiagent/bin/ic-agent",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA… invoice-collector
+```
+
+The agent's Claude login goes in `~/.config/ic-agent/env` as `CLAUDE_CODE_OAUTH_TOKEN=…` (from
+`claude setup-token`); optional `IC_AGENT_MODEL`, `IC_AGENT_TIMEOUT`, `IC_AGENT_DOC_TIMEOUT`, `IC_AGENT_INBOX`.
+In Settings choose mode `ssh`, and enter host, port, user, and host-key fingerprint
+(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`). On the OCI VM the host is `host.docker.internal`
+(the compose file maps it to the VM).
+
+#### Scans and photos through the agent (shared folder)
+
+Text PDFs go to the agent as text. A document with no text layer (a scan, a photographed receipt, a JPG/PNG
+from Gmail) has to be *read*, so the app hands the agent the file through a folder both can reach:
+
+1. The app writes the PDF to `<inbox>/<random id>/document.pdf` and asks for `claude -p --document <id>`.
+2. The wrapper checks the id (`[A-Za-z0-9-]{16,64}`), that the folder and file are real (no symlinks) and inside
+   the inbox, and runs Claude Code from that one folder with
+   `--restricted --tools Read --allowedTools "Read(./document.pdf)" --permission-mode dontAsk --strict-mcp-config --no-session-persistence`:
+   it can read that document and nothing else (no shell, no web, no other files, no MCP servers, no transcript).
+3. When the answer is back (or on any error or timeout) the app deletes `<id>/`. A sweep at startup and every
+   10 minutes removes anything older than 15 minutes that a crash left behind. The document itself stays in the
+   app's database as always.
+
+| Path | Owner | Group | Mode | Who can do what |
+| --- | --- | --- | --- | --- |
+| `/srv/ic-inbox` (host) = `/inbox` (app) | uid 1000 (the container's `node`) | `ic-inbox` (only `aiagent`) | `2750` | app writes and deletes; agent lists and reads; nobody else |
+| `<id>/` | node | ic-inbox (setgid) | `0750` | same |
+| `<id>/document.pdf` | node | ic-inbox | `0640` | app writes; agent reads |
+
+One-time setup on the VM (as a sudoer), then redeploy (the compose file mounts the folder and sets
+`AI_INBOX_DIR=/inbox`):
+
+```sh
+sudo groupadd --system ic-inbox
+sudo usermod -aG ic-inbox aiagent
+sudo install -d -o 1000 -g ic-inbox -m 2750 /srv/ic-inbox
+sudo install -o root -g root -m 755 ~/invoice-collector/deploy/ic-agent.sh /home/aiagent/bin/ic-agent
+```
+
+Without `AI_INBOX_DIR` the SSH agent stays text-only and scans wait in Needs attention
+(`scan_needs_api_ai`); after setting it up, retry those items. The Settings connection check also verifies that
+the app can write to the folder. `bash test/ic-agent-wrapper.sh` (on Linux) checks the wrapper with a stub `claude`.
+
+Gmail: image attachments (JPEG/PNG, at least 15 KB, up to 5 per email) are collected only from emails with no
+PDF attachment, and become one-page PDFs. The Gmail search is unchanged, so an image-only email is found when it
+says invoice/receipt/חשבונית/קבלה or carries your Gmail label.
 
 ## 6. Paper receipts: upload and the Telegram bot, optional
 

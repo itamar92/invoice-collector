@@ -8,6 +8,10 @@ import {
 } from '../server/ai/provider.js';
 import { hostKeyMatches, runOverSsh, SshAgentProvider, type SshClientLike } from '../server/ai/sshAgent.js';
 import type { ExtractedFields } from '../server/core/types.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { INBOX_ID, sweepInbox } from '../server/ai/inbox.js';
 
 const FIELDS: ExtractedFields = {
   vendorName: 'Demo Ltd', vendorTaxId: null, docType: 'tax_invoice', docNumber: '123', issueDate: '2026-03-05',
@@ -266,4 +270,94 @@ test('empty model string falls back to the default model', async () => {
   const p = getAiProvider({ ai: { mode: 'anthropic', model: '' } }, { getSecret: key, anthropic: { messages: { create } } })!;
   await p.completeJson({ system: '', user: '' });
   assert.equal(seen.m, DEFAULT_MODELS.anthropic);
+});
+
+// --- ssh + shared inbox ---
+const tmpInbox = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ic-inbox-'));
+
+test('ssh with inbox: a scan is written to <inbox>/<id>/document.pdf for the call, then removed', async () => {
+  const inbox = tmpInbox();
+  const seen: { mode: number; data: string; dirMode: number }[] = [];
+  const execs: string[] = [];
+  const written: string[] = [];
+  const factory = () => {
+    const c = fakeClient(HOST_KEY);
+    const origExec = c.exec;
+    c.exec = (cmd, cb) => {
+      execs.push(cmd);
+      const id = /^claude -p --document (\S+)$/.exec(cmd)?.[1];
+      if (id) {
+        const f = path.join(inbox, id, 'document.pdf');
+        seen.push({ mode: fs.statSync(f).mode & 0o777, data: fs.readFileSync(f, 'latin1'), dirMode: fs.statSync(path.dirname(f)).mode & 0o777 });
+      }
+      origExec(cmd, cb);
+      written.push(...c.written);
+    };
+    return c;
+  };
+  const p = new SshAgentProvider(CFG, 'k', factory, inbox);
+  assert.equal(p.supportsPdf, true);
+  await aiExtract(p, { text: '', pdf: Buffer.from('%PDF-scan'), isScan: true, sender: 's', categories: [] });
+  assert.deepEqual(await p.completeJson({ system: 'S', user: 'U', pdf: Buffer.from('%PDF-scan') }), { ok: true });
+  assert.equal(execs.length, 2);
+  for (const cmd of execs) {
+    const id = /^claude -p --document (\S+)$/.exec(cmd)?.[1];
+    assert.ok(id && INBOX_ID.test(id), cmd);
+  }
+  assert.notEqual(execs[0], execs[1], 'a fresh id per request');
+  assert.deepEqual(seen.map((s) => [s.mode, s.dirMode, s.data]), [[0o640, 0o750, '%PDF-scan'], [0o640, 0o750, '%PDF-scan']]);
+  await new Promise((r) => setImmediate(r));
+  assert.match(written.join('\n') || '', /document\.pdf[\s\S]*Read tool/);
+  assert.deepEqual(fs.readdirSync(inbox), [], 'nothing left behind');
+});
+
+test('ssh with inbox: text documents still go as text; failures and timeouts also clean up', async () => {
+  const inbox = tmpInbox();
+  const c = fakeClient(HOST_KEY, JSON.stringify(FIELDS));
+  const p = new SshAgentProvider(CFG, 'k', () => c, inbox);
+  await aiExtract(p, { text: TEXT, pdf: Buffer.from('%PDF-text'), isScan: false, sender: 's', categories: [] });
+  assert.deepEqual(c.execs, ['claude -p']);
+  assert.doesNotMatch(c.written[0] ?? '', /attached as a PDF/);
+
+  const bad = new SshAgentProvider(CFG, 'k', () => fakeClient(HOST_KEY, '', 1), inbox);
+  await assert.rejects(bad.completeJson({ system: '', user: '', pdf: Buffer.from('%PDF') }), AiUnavailableError);
+  assert.deepEqual(fs.readdirSync(inbox), []);
+
+  const hang = new EventEmitter() as any;
+  hang.connect = () => { throw new Error('connect refused'); }; hang.end = () => {};
+  const broken = new SshAgentProvider(CFG, 'k', () => hang, inbox);
+  await assert.rejects(broken.completeJson({ system: '', user: '', pdf: Buffer.from('%PDF') }), AiUnavailableError);
+  assert.deepEqual(fs.readdirSync(inbox), []);
+});
+
+test('ssh with an unwritable inbox: unavailable (the item waits), and the connection check says so', async () => {
+  const missing = path.join(tmpInbox(), 'missing');
+  const c = fakeClient(HOST_KEY);
+  const p = new SshAgentProvider(CFG, 'k', () => c, missing);
+  await assert.rejects(p.completeJson({ system: '', user: '', pdf: Buffer.from('%PDF') }), /AI inbox folder/);
+  assert.deepEqual(c.execs, []);
+  await assert.rejects(p.ping(), /AI inbox folder/);
+  const ok = tmpInbox();
+  await new SshAgentProvider(CFG, 'k', () => fakeClient(HOST_KEY, 'v'), ok).ping();
+  assert.deepEqual(fs.readdirSync(ok), []);
+});
+
+test('getAiProvider ssh: PDF support follows the inbox setting', () => {
+  const secret = () => 'KEY';
+  assert.equal(getAiProvider({ ai: { mode: 'ssh', ssh: CFG } }, { getSecret: secret, inboxDir: null })!.supportsPdf, false);
+  const p = getAiProvider({ ai: { mode: 'ssh', ssh: CFG } }, { getSecret: secret, inboxDir: '/inbox' })!;
+  assert.equal(p.supportsPdf, true);
+  assert.equal(p.pdfOnlyForScans, true);
+});
+
+test('sweepInbox removes only entries older than the limit', () => {
+  const inbox = tmpInbox();
+  fs.mkdirSync(path.join(inbox, 'old-0000000000000000'));
+  fs.writeFileSync(path.join(inbox, 'old-0000000000000000', 'document.pdf'), 'x');
+  fs.mkdirSync(path.join(inbox, 'new-0000000000000000'));
+  const past = new Date(Date.now() - 60 * 60_000);
+  fs.utimesSync(path.join(inbox, 'old-0000000000000000'), past, past);
+  assert.equal(sweepInbox(inbox, 15 * 60_000), 1);
+  assert.deepEqual(fs.readdirSync(inbox), ['new-0000000000000000']);
+  assert.equal(sweepInbox(path.join(inbox, 'nope')), 0);
 });

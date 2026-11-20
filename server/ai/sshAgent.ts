@@ -10,11 +10,16 @@ import ssh2 from 'ssh2';
 import {
   AiUnavailableError, parseJsonReply, type AiProvider, type AiRequest,
 } from './provider.js';
+import { INBOX_FILE, checkInbox, withInboxFile } from './inbox.js';
 
 /** Fixed remote command. Never built from any input. */
 export const SSH_COMMAND = 'claude -p';
+/** Analysis of a document in the shared inbox; the only variable part is the id the app generated itself. */
+export const sshDocumentCommand = (id: string) => `claude -p --document ${id}`;
 const SSH_VERSION_COMMAND = 'claude --version';
 export const SSH_TIMEOUT_MS = 120_000;
+/** Reading a scan takes longer; the wrapper stops at 170 s so its own message arrives first. */
+export const SSH_DOCUMENT_TIMEOUT_MS = 180_000;
 const READY_TIMEOUT_MS = 15_000;
 
 export interface SshConfig { host: string; port: number; user: string; hostKeySha256: string }
@@ -89,29 +94,41 @@ export function runOverSsh(opts: {
     });
     client.on('error', (err: Error) => finish(new AiUnavailableError(`ssh connection failed: ${err.message}`)));
 
-    client.connect({
-      host: config.host,
-      port: config.port,
-      username: config.user,
-      privateKey: opts.privateKey,
-      readyTimeout: READY_TIMEOUT_MS,
-      hostVerifier: (key: Buffer) => {
-        if (hostKeyMatches(key, config.hostKeySha256)) { verified = true; return true; }
-        finish(new AiUnavailableError('ssh host key mismatch: not the pinned host'));
-        return false;
-      },
-    });
+    try {
+      client.connect({
+        host: config.host,
+        port: config.port,
+        username: config.user,
+        privateKey: opts.privateKey,
+        readyTimeout: READY_TIMEOUT_MS,
+        hostVerifier: (key: Buffer) => {
+          if (hostKeyMatches(key, config.hostKeySha256)) { verified = true; return true; }
+          finish(new AiUnavailableError('ssh host key mismatch: not the pinned host'));
+          return false;
+        },
+      });
+    } catch (e) { // e.g. an unparsable private key: ssh2 throws before connecting
+      finish(new AiUnavailableError(`ssh connection failed: ${(e as Error).message}`));
+    }
   });
 }
 
+/**
+ * Text goes down stdin. With a shared inbox folder (AI_INBOX_DIR) the agent can also read a document: the PDF is
+ * written there for the length of one request (server/ai/inbox.ts). That is slow, so only scans are sent that way.
+ */
 export class SshAgentProvider implements AiProvider {
   name = 'ssh';
-  supportsPdf = false; // text only
+  supportsPdf: boolean;
+  pdfOnlyForScans = true;
   constructor(
     private config: SshConfig,
     private privateKey: string,
     private factory: SshClientFactory = defaultFactory,
-  ) {}
+    private inbox: string | null = null,
+  ) {
+    this.supportsPdf = inbox !== null;
+  }
 
   private run(command: string, prompt: string, timeoutMs?: number): Promise<SshRun> {
     return runOverSsh({
@@ -121,12 +138,20 @@ export class SshAgentProvider implements AiProvider {
 
   async completeJson(req: AiRequest): Promise<unknown> {
     const prompt = `${req.system}\n\n${req.user}\n\nReply with a single JSON object only.`;
-    const r = await this.run(SSH_COMMAND, prompt);
+    const r = req.pdf && this.inbox
+      ? await withInboxFile(this.inbox, req.pdf, (id) => this.run(
+        sshDocumentCommand(id),
+        `The invoice is the file ${INBOX_FILE} in your working directory. Read it with the Read tool `
+          + `(it may be a scan or a photo), then answer from what you see in it.\n\n${prompt}`,
+        SSH_DOCUMENT_TIMEOUT_MS,
+      ))
+      : await this.run(SSH_COMMAND, prompt);
     if (r.code !== 0) throw new AiUnavailableError(`ssh agent exited ${r.code}: ${r.stderr.trim().slice(0, 200)}`);
     return parseJsonReply(r.stdout);
   }
 
   async ping(): Promise<void> {
+    if (this.inbox) checkInbox(this.inbox);
     const r = await this.run(SSH_VERSION_COMMAND, '', 30_000);
     if (r.code !== 0) throw new AiUnavailableError(`ssh "${SSH_VERSION_COMMAND}" failed: ${r.stderr.trim().slice(0, 200)}`);
   }

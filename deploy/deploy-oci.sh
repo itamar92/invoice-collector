@@ -73,6 +73,17 @@ MSG
   exit 0
 fi
 
+echo "==> Checking the SSH agent's shared folder"
+if ! ssh_run 'd=/srv/ic-inbox; [ -d "$d" ] && [ "$(stat -c %u:%G:%a "$d")" = "1000:ic-inbox:2750" ]'; then
+  cat <<'MSG'
+  /srv/ic-inbox is missing or has the wrong owner/mode, so the SSH agent cannot read scans (text invoices
+  still work). One-time setup on the VM (docs/SETUP.md, section 5):
+    sudo groupadd --system ic-inbox
+    sudo usermod -aG ic-inbox aiagent
+    sudo install -d -o 1000 -g ic-inbox -m 2750 /srv/ic-inbox
+MSG
+fi
+
 echo "==> Building and starting (first build on the VM takes a few minutes)"
 ssh_run "cd ~/$REMOTE_DIR && (docker compose up -d --build || sudo docker compose up -d --build)"
 
