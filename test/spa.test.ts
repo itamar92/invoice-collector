@@ -71,6 +71,9 @@ test('a missing asset under /assets is a 404, not index.html; non-GET is not ser
   const base = await boot();
   const r = await fetch(`${base}/assets/missing.js`);
   assert.equal(r.status, 404);
+  for (const p of ['/favicon.svg', '/manifest.webmanifest', '/icon-192.png']) {
+    assert.equal((await fetch(base + p)).status, 404, p);
+  }
   const post = await fetch(`${base}/attention`, { method: 'POST' });
   assert.equal(post.status, 404);
 });

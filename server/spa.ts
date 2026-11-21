@@ -12,6 +12,9 @@ export function serveSpa(app: express.Express, dir: string): void {
   app.use(express.static(dir, { index: false }));
   app.get('*', (req, res, next) => {
     if (req.path === '/api' || req.path.startsWith('/api/') || req.path.startsWith('/assets/')) return next();
+    // A missing file (/favicon.svg, /manifest.webmanifest) is a 404, not the page: client routes have no
+    // dot in their last segment (item ids are UUIDs), and HTML in place of an icon hides a broken build.
+    if (path.posix.basename(req.path).includes('.')) return next();
     if (!fs.existsSync(index)) return next();
     res.sendFile(index);
   });
