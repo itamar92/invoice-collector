@@ -11,6 +11,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
+# Favicon, app icons and the web app manifest; Vite copies them into dist as they are.
+COPY public ./public
 # The UI imports shared code (naming, types, settings types) from server/.
 COPY server ./server
 RUN npm run build
