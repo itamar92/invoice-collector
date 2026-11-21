@@ -18,6 +18,8 @@ export const SSH_COMMAND = 'claude -p';
 export const sshDocumentCommand = (id: string) => `claude -p --document ${id}`;
 const SSH_VERSION_COMMAND = 'claude --version';
 export const SSH_TIMEOUT_MS = 120_000;
+/** Key the agent replies with, instead of fields, when it cannot open the document. */
+export const UNREADABLE_KEY = 'documentUnreadable';
 /** Reading a scan takes longer; the wrapper stops at 170 s so its own message arrives first. */
 export const SSH_DOCUMENT_TIMEOUT_MS = 180_000;
 const READY_TIMEOUT_MS = 15_000;
@@ -142,12 +144,21 @@ export class SshAgentProvider implements AiProvider {
       ? await withInboxFile(this.inbox, req.pdf, (id) => this.run(
         sshDocumentCommand(id),
         `The invoice is the file ${INBOX_FILE} in your working directory. Read it with the Read tool `
-          + `(it may be a scan or a photo), then answer from what you see in it.\n\n${prompt}`,
+          + `(it may be a scan or a photo), then answer from what you see in it. If the Read tool fails or the file `
+          + `cannot be read, do not guess and do not answer with empty fields: reply with exactly `
+          + `{"${UNREADABLE_KEY}": "<the exact error>"} instead.\n\n${prompt}`,
         SSH_DOCUMENT_TIMEOUT_MS,
       ))
       : await this.run(SSH_COMMAND, prompt);
     if (r.code !== 0) throw new AiUnavailableError(`ssh agent exited ${r.code}: ${r.stderr.trim().slice(0, 200)}`);
-    return parseJsonReply(r.stdout);
+    const reply = parseJsonReply(r.stdout);
+    const unreadable = (reply as Record<string, unknown> | null)?.[UNREADABLE_KEY];
+    if (req.pdf && this.inbox && unreadable !== undefined) {
+      // Usually setup (folder permissions, pdftoppm missing on the agent host): the item waits and retries, and
+      // gives up after a few tries while other documents get through.
+      throw new AiUnavailableError(`ssh agent could not read the document: ${String(unreadable).slice(0, 200)}`);
+    }
+    return reply;
   }
 
   async ping(): Promise<void> {

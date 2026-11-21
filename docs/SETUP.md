@@ -176,7 +176,12 @@ sudo groupadd --system ic-inbox
 sudo usermod -aG ic-inbox aiagent
 sudo install -d -o 1000 -g ic-inbox -m 2750 /srv/ic-inbox
 sudo install -o root -g root -m 755 ~/invoice-collector/deploy/ic-agent.sh /home/aiagent/bin/ic-agent
+sudo apt-get install -y poppler-utils   # Claude Code's Read tool needs pdftoppm to open PDFs
 ```
+
+Install the wrapper after the deploy that brings the new version to the VM. If the agent cannot open a document
+(folder permissions, `pdftoppm` missing) it says so instead of answering: the item waits as "AI unavailable"
+with that error, and goes to Needs attention after a few tries while other documents get through.
 
 Without `AI_INBOX_DIR` the SSH agent stays text-only and scans wait in Needs attention
 (`scan_needs_api_ai`); after setting it up, retry those items. The Settings connection check also verifies that

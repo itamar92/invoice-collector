@@ -330,6 +330,20 @@ test('ssh with inbox: text documents still go as text; failures and timeouts als
   assert.deepEqual(fs.readdirSync(inbox), []);
 });
 
+test('ssh document read that fails is an unavailable error, not empty fields; folder still removed', async () => {
+  const inbox = tmpInbox();
+  const reply = JSON.stringify({ documentUnreadable: "EACCES: permission denied, open 'document.pdf'" });
+  const p = new SshAgentProvider(CFG, 'k', () => fakeClient(HOST_KEY, reply), inbox);
+  await assert.rejects(
+    aiExtract(p, { text: '', pdf: Buffer.from('%PDF'), isScan: true, sender: '', categories: [] }),
+    (e: Error) => e instanceof AiUnavailableError && /could not read the document: EACCES/.test(e.message),
+  );
+  assert.deepEqual(fs.readdirSync(inbox), []);
+  // The key means nothing on the text path.
+  const t = new SshAgentProvider(CFG, 'k', () => fakeClient(HOST_KEY, reply), inbox);
+  assert.deepEqual(await t.completeJson({ system: '', user: '' }), JSON.parse(reply));
+});
+
 test('ssh with an unwritable inbox: unavailable (the item waits), and the connection check says so', async () => {
   const missing = path.join(tmpInbox(), 'missing');
   const c = fakeClient(HOST_KEY);
