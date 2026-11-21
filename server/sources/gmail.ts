@@ -8,6 +8,7 @@ import { clearIngestFailure } from '../core/ingestFailures.js';
 import { ImageError, imageToPdf } from '../core/imagePdf.js';
 import { LinkError, downloadPdf, findInvoiceLinks } from './links.js';
 import type { DownloadOptions } from './links.js';
+import { metaReceiptDocument, parseMetaReceipt } from './meta.js';
 
 export const INVOICE_QUERY =
   '(has:attachment filename:pdf OR "חשבונית" OR "קבלה" OR invoice OR receipt) -in:sent -in:chats';
@@ -307,7 +308,8 @@ function pdfName(name: string): string {
 
 /**
  * Ingests one Gmail message: PDFs become items; with no PDF attachment, JPEG/PNG attachments become one-page
- * PDFs; with neither, invoice links are downloaded;
+ * PDFs; with neither, a Meta ads receipt email gets Meta's PDF or one built from the email (see meta.ts), and
+ * other emails have their invoice links downloaded;
  * if nothing usable is found a placeholder item keeps the email visible. Already-ingested ids are skipped.
  */
 export async function ingestMessage(
@@ -319,7 +321,7 @@ export async function ingestMessage(
   }
   const msg = await gmail.fetchMessage(id);
   // An attachment called .pdf that is not one (no %PDF- header) is never stored as a document.
-  let pdfs = msg.pdfs.filter((p) => isPdf(p.data));
+  let pdfs: { name: string; data: Buffer; note?: string }[] = msg.pdfs.filter((p) => isPdf(p.data));
   const notPdf = msg.pdfs.filter((p) => !isPdf(p.data));
   if (msg.pdfs.length === 0) {
     for (const img of msg.images ?? []) {
@@ -330,7 +332,10 @@ export async function ingestMessage(
     }
   }
   let failure: Reason | null = null;
-  if (pdfs.length === 0 && notPdf.length === 0) {
+  const meta = pdfs.length === 0 && notPdf.length === 0 ? parseMetaReceipt(msg.html) : null;
+  if (meta) {
+    pdfs = [await metaReceiptDocument(meta, msg.receivedAt, downloadOpts)];
+  } else if (pdfs.length === 0 && notPdf.length === 0) {
     const got: { name: string; data: Buffer }[] = [];
     for (const url of findInvoiceLinks(msg.html, msg.text)) {
       try {
@@ -355,7 +360,7 @@ export async function ingestMessage(
       createPlaceholderItem(id, failure ?? 'no_document');
       return { skipped: false, items: 1 };
     }
-    for (const p of pdfs) createItem(id, p.name, p.data);
+    for (const p of pdfs) createItem(id, p.name, p.data, p.note);
     return { skipped: false, items: pdfs.length + notPdf.length };
   })();
 }

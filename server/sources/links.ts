@@ -142,6 +142,8 @@ export interface DownloadOptions {
   fetchImpl?: typeof fetch;
   maxBytes?: number;
   timeoutMs?: number;
+  /** Extra request headers (e.g. a login cookie), sent only while the URL's host matches `hosts`. */
+  headersFor?: { hosts: RegExp; headers: Record<string, string> };
 }
 
 const defaultResolve = (host: string) => lookup(host, { all: true });
@@ -191,7 +193,8 @@ export async function downloadPdf(url: string, opts: DownloadOptions = {}): Prom
     }
     for (let hop = 0; ; hop++) {
       await assertSafe(current, resolve);
-      const res = await doFetch(current.toString(), { redirect: 'manual', signal });
+      const extra = opts.headersFor && opts.headersFor.hosts.test(current.hostname) ? opts.headersFor.headers : undefined;
+      const res = await doFetch(current.toString(), { redirect: 'manual', signal, ...(extra ? { headers: extra } : {}) });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get('location');
         await res.body?.cancel().catch(() => {});
