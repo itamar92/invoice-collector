@@ -33,8 +33,10 @@ export async function withInboxFile<T>(dir: string, pdf: Buffer, fn: (id: string
   const id = randomUUID();
   const sub = path.join(dir, id);
   try {
+    // The new directory inherits the inbox's group and setgid bit, so the file gets the agent's group. Never chmod
+    // it unless the umask stripped group access: chmod by a non-member of that group clears setgid (Linux).
     fs.mkdirSync(sub, { mode: 0o750 });
-    fs.chmodSync(sub, 0o750); // umask may have dropped group bits; setgid is inherited from the parent
+    if ((fs.statSync(sub).mode & 0o050) !== 0o050) fs.chmodSync(sub, 0o750);
     fs.writeFileSync(path.join(sub, INBOX_FILE), pdf, { mode: 0o640, flag: 'wx' });
     fs.chmodSync(path.join(sub, INBOX_FILE), 0o640);
   } catch (e) {
