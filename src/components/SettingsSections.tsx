@@ -157,6 +157,12 @@ export function ConnectionsSection() {
         <ErrorText>{saving.error}</ErrorText>
         <p className={hintCls}>{t('connect.neverApproved')}</p>
       </div>
+
+      <div className="space-y-3 border-t border-line py-3">
+        <div className="text-base font-semibold">{t('conn.meta')}</div>
+        <p className={hintCls}>{t('connect.metaHint')}</p>
+        <SecretInput label={t('connect.metaCookies')} configured={secrets.meta_cookies} onSave={(v) => saveSecret('meta_cookies', v)} multiline />
+      </div>
     </div>
   );
 }

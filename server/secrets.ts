@@ -3,11 +3,13 @@ import { getDb } from './db.js';
 
 export type SecretKey =
   | 'gmail_refresh' | 'dropbox_refresh' | 'gdrive_refresh' | 'morning_id' | 'morning_secret'
-  | 'ai_key_anthropic' | 'ai_key_openai' | 'ai_key_gemini' | 'ssh_private_key' | 'telegram_bot_token' | 'telegram_relay_auth';
+  | 'ai_key_anthropic' | 'ai_key_openai' | 'ai_key_gemini' | 'ssh_private_key' | 'telegram_bot_token' | 'telegram_relay_auth'
+  | 'meta_cookies';
 
 export const SECRET_KEYS: SecretKey[] = [
   'gmail_refresh', 'dropbox_refresh', 'gdrive_refresh', 'morning_id', 'morning_secret',
   'ai_key_anthropic', 'ai_key_openai', 'ai_key_gemini', 'ssh_private_key', 'telegram_bot_token', 'telegram_relay_auth',
+  'meta_cookies',
 ];
 
 /** AES-256-GCM key = sha256(SECRET_KEY). Read lazily so tests can set the env first. */

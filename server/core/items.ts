@@ -76,7 +76,7 @@ function insertItem(
 }
 
 export function createItem(
-  messageId: string, attachmentName: string | null, pdf: Buffer,
+  messageId: string, attachmentName: string | null, pdf: Buffer, note?: string,
 ): { id: string; duplicateOf?: string } {
   const db = getDb();
   const id = randomUUID();
@@ -89,7 +89,7 @@ export function createItem(
       return { id, duplicateOf: orig };
     }
     insertItem(id, messageId, attachmentName, pdf, hash, 'queued', 'duplicate');
-    addEvent(id, null, 'queued');
+    addEvent(id, null, 'queued', note);
     return { id };
   })();
 }

@@ -111,6 +111,8 @@ export default function ItemDetail() {
   const invoiceOf = item.state === 'ignored'
     ? item.events.map((e) => /^receipt_of_invoice:(.+)$/.exec(e.note ?? '')?.[1]).filter(Boolean).pop() ?? null
     : null;
+  // Meta's own receipt PDF could not be downloaded, so this document was built from the receipt email.
+  const madeFromEmail = item.events.some((e) => (e.note ?? '').startsWith('made_from_email:'));
   const keepReceipt = () => act.run(async () => {
     await api.keepReceipt(item.id);
     await leave(t('item.receiptKeptNamed', { name: itemTitle(item) }));
@@ -145,6 +147,7 @@ export default function ItemDetail() {
       {item.reason && item.state === 'needs_attention' && <ErrorText>{t('common.reason')}: {reasonLabel(item.reason)}</ErrorText>}
       {uploaded && !msg && !(uploaded === 'new' && item.state === 'needs_attention') && <Notice tone={uploaded === 'new' ? 'ok' : 'warn'}>{t(`upload.${uploaded}`)}</Notice>}
       {msg && <Notice tone="ok">{msg}</Notice>}
+      {madeFromEmail && <Notice tone="warn">{t('item.madeFromEmail')}</Notice>}
       {invoiceOf && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-info-tint px-3 py-2 text-sm">
           <span>{t('item.receiptSetAside')}</span>
