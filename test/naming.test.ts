@@ -10,14 +10,14 @@ const s = { ...(structuredClone(IL_DEFAULTS) as unknown as Settings),
 const f: ExtractedFields = {
   vendorName: 'אקו"ם', vendorTaxId: null, docType: 'tax_invoice_receipt', docNumber: null,
   issueDate: '2026-02-01', total: 1200, vat: null, net: null, currency: null,
-  allocationNumber: null, description: 'דמי חבר 1/2026', category: 'הנהלת חשבונות',
+  allocationNumber: null, description: 'דמי חבר 1/2026', category: 'שירותי הנהלת חשבונות',
 };
 
 test('filename spec example', () => {
   assert.equal(buildFilename(f, s), '2026-02-01_חשבונית מס קבלה_אקו"ם_דמי חבר 1-2026_1200_שח.pdf');
 });
 test('folder spec example', () => {
-  assert.equal(buildFolder(f, s), '/Business/חשבוניות - קבלות/2026/הנהלת חשבונות');
+  assert.equal(buildFolder(f, s), '/Business/חשבוניות - קבלות/2026/שירותי הנהלת חשבונות');
 });
 test('amount formatting', () => {
   assert.match(buildFilename({ ...f, total: 59.9 }, s), /_59\.9_/);
@@ -44,7 +44,7 @@ test('folder sanitizes category and throws without required values', () => {
   assert.throws(() => buildFolder({ ...f, issueDate: null }, s));
 });
 test('folder: no double or trailing slash', () => {
-  assert.equal(buildFolder(f, { ...s, storageRoot: '/r/' }), '/r/2026/הנהלת חשבונות');
+  assert.equal(buildFolder(f, { ...s, storageRoot: '/r/' }), '/r/2026/שירותי הנהלת חשבונות');
 });
 
 test('category ., .., blank are rejected', () => {
@@ -59,7 +59,7 @@ test('filename parts . and .. become -', () => {
 });
 test('year/category/root substituted in filename template', () => {
   const t = { ...s, filenameTemplate: '{year}_{category}_{root}_{amount}' };
-  assert.equal(buildFilename(f, t), '2026_הנהלת חשבונות_-Business-חשבוניות - קבלות_1200.pdf');
+  assert.equal(buildFilename(f, t), '2026_שירותי הנהלת חשבונות_-Business-חשבוניות - קבלות_1200.pdf');
 });
 
 test('folder: used placeholders are strict (description, amount)', () => {

@@ -57,7 +57,7 @@ function layoutRecipe(vendorKey: string, sender: string, over: Partial<Recipe> =
   };
 }
 
-function knownVendor(key: string, sender: string, status: VendorStatus, category = 'תוכנות', over: Partial<Recipe> = {}) {
+function knownVendor(key: string, sender: string, status: VendorStatus, category = 'תוכנה', over: Partial<Recipe> = {}) {
   saveRecipe(layoutRecipe(key, sender, over), 'starter');
   setVendorStatus(key, status);
   setVendorCategory(key, category);
@@ -122,13 +122,13 @@ function fakeAi(o: { supportsPdf?: boolean; pdfOnlyForScans?: boolean; category?
           issueDate: y ? `${y}-${m}-${d}` : null,
           total: Number(/Total: ([\d.]+)/.exec(text)?.[1] ?? 'NaN') || null,
           vat: null, net: null, currency: 'ILS', allocationNumber: null, description: 'widgets',
-          category: o.category === undefined ? 'תוכנות' : o.category,
+          category: o.category === undefined ? 'תוכנה' : o.category,
           ...ai.overrideFields,
         };
       }
       if (req.system === RECIPE_SYSTEM) {
         ai.recipeCalls++;
-        return layoutRecipe('whatever-the-ai-said', sender, { fields: { ...layoutRecipe('x', sender).fields, category: { kind: 'const', value: 'תוכנות' } } });
+        return layoutRecipe('whatever-the-ai-said', sender, { fields: { ...layoutRecipe('x', sender).fields, category: { kind: 'const', value: 'תוכנה' } } });
       }
       throw new Error('unexpected prompt');
     },
@@ -177,12 +177,12 @@ test('known vendor (starter recipe, business) → done; storage once, accounting
   const it = getItem(id)!;
   assert.equal(it.provenance, 'recipe');
   assert.equal(it.vendorKey, 'acme');
-  assert.equal(it.fields?.category, 'תוכנות');
-  assert.equal(it.storagePath, '/Inv/2026/תוכנות/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח.pdf');
+  assert.equal(it.fields?.category, 'תוכנה');
+  assert.equal(it.storagePath, '/Inv/2026/תוכנה/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח.pdf');
   assert.equal(it.accountingRef, 'acc-1');
   assert.equal(it.accountingMode, 'api_fields');
   assert.equal(acc.calls[0]!.filename, '2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח.pdf');
-  assert.equal(acc.calls[0]!.category.name, 'תוכנות');
+  assert.equal(acc.calls[0]!.category.name, 'תוכנה');
   assert.ok(acc.calls[0]!.pdf.equals(pdf));
   assert.ok(st.files.get(it.storagePath!)!.equals(pdf));
 });
@@ -197,16 +197,17 @@ test('personal vendor → done, stored, accounting not called', async () => {
   assert.ok(notes(id).includes('vendor_personal'));
 });
 
-test('category הוצאות רפואיות → not sent; תרומות → sent', async () => {
-  knownVendor('med', 'billing@med.example', 'business', 'הוצאות רפואיות');
+test('category set not to send → not sent; תרומות → sent', async () => {
+  const settings = { ...SETTINGS, categories: SETTINGS.categories.map(c => c.name === 'עלויות אחרות' ? { ...c, sendToAccounting: false } : c) };
+  knownVendor('med', 'billing@med.example', 'business', 'עלויות אחרות');
   knownVendor('don', 'billing@don.example', 'business', 'תרומות');
   const acc = fakeAccounting();
   const a = newItem(invoiceText(), { sender: 'billing@med.example' });
   const b = newItem(invoiceText({ num: '2002' }), { sender: 'billing@don.example' });
-  assert.equal(await processItem(a.id, deps({ accounting: acc })), 'done');
+  assert.equal(await processItem(a.id, deps({ accounting: acc, settings })), 'done');
   assert.equal(acc.calls.length, 0);
   assert.ok(notes(a.id).includes('category_not_sent'));
-  assert.equal(await processItem(b.id, deps({ accounting: acc })), 'done');
+  assert.equal(await processItem(b.id, deps({ accounting: acc, settings })), 'done');
   assert.equal(acc.calls.length, 1);
   assert.equal(acc.calls[0]!.category.name, 'תרומות');
 });
@@ -341,7 +342,7 @@ test('crash resume: stored with accounting_ref recorded → not sent again', asy
 test('storage exists with same content → no upload, path reused', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const { id, pdf } = newItem(invoiceText());
-  const path = '/Inv/2026/תוכנות/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח.pdf';
+  const path = '/Inv/2026/תוכנה/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח.pdf';
   const st = fakeStorage({ [path]: pdf });
   assert.equal(await processItem(id, deps({ storage: st })), 'done');
   assert.equal(st.puts, 0);
@@ -351,7 +352,7 @@ test('storage exists with same content → no upload, path reused', async () => 
 test('storage exists with different content → filename _2, then _3', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const { id, pdf } = newItem(invoiceText());
-  const base = '/Inv/2026/תוכנות/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח';
+  const base = '/Inv/2026/תוכנה/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח';
   const st = fakeStorage({ [`${base}.pdf`]: Buffer.from('other') });
   assert.equal(await processItem(id, deps({ storage: st })), 'done');
   assert.equal(st.puts, 1);
@@ -367,7 +368,7 @@ test('storage exists with different content → filename _2, then _3', async () 
 test('every suffix up to _20 taken → needs_attention/storage_error', async () => {
   knownVendor('acme', 'billing@acme.example', 'business');
   const { id, pdf } = newItem(invoiceText());
-  const base = '/Inv/2026/תוכנות/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח';
+  const base = '/Inv/2026/תוכנה/2026-06-05_חשבונית מס_Demo Widgets Ltd_117_שח';
   const seed: Record<string, Buffer> = { [`${base}.pdf`]: Buffer.from('o') };
   for (let n = 2; n <= 20; n++) seed[`${base}_${n}.pdf`] = Buffer.from('o');
   const st = fakeStorage(seed);
@@ -377,7 +378,7 @@ test('every suffix up to _20 taken → needs_attention/storage_error', async () 
 });
 
 test('receipt after a sent invoice → set aside: not filed, not sent', async () => {
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: {
       ...layoutRecipe('acme', 'x').fields,
       docType: { kind: 'regex', pattern: '^(Tax Invoice|Receipt) ', flags: 'm', parse: 'docType' },
@@ -436,7 +437,7 @@ test('storage fails 5 times → needs_attention/storage_error, with backoff in b
 
 test('recipe result fails validation → AI fallback, recipe rewritten (new version), done with recipe_rewritten', async () => {
   // The starter recipe reads the wrong total pattern on this layout → missing_total.
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.,]+)', parse: 'amount' } },
   });
   const ai = fakeAi();
@@ -469,7 +470,7 @@ test('recipe matched another vendor\'s document: AI names a different tax id →
     },
   }), 'starter');
   setVendorStatus('vendor-a', 'business');
-  setVendorCategory('vendor-a', 'תוכנות');
+  setVendorCategory('vendor-a', 'תוכנה');
   const ai = fakeAi();
   ai.overrideFields = { vendorName: 'Vendor B Ltd', vendorTaxId: '522222222' };
   const acc = fakeAccounting();
@@ -491,7 +492,7 @@ test('recipe matched another vendor\'s document: AI names a different tax id →
 });
 
 test('recipe fails validation and no AI → needs_attention/<problem>', async () => {
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.,]+)', parse: 'amount' } },
   });
   const { id } = newItem(invoiceText());
@@ -501,7 +502,7 @@ test('recipe fails validation and no AI → needs_attention/<problem>', async ()
 });
 
 test('aiAlways recipe → AI extraction every time, no rewrite', async () => {
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', { aiAlways: true });
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', { aiAlways: true });
   const ai = fakeAi();
   const { id } = newItem(invoiceText());
   assert.equal(await processItem(id, deps({ ai })), 'done');
@@ -538,12 +539,12 @@ test('category: not in settings and no vendor default → needs_attention/unknow
 });
 
 test('category: falls back to vendor default when the extracted one is unknown', async () => {
-  knownVendor('acme', 'billing@acme.example', 'business', 'אינטרנט', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'הוצאות דואר ותקשורת', {
     fields: { ...layoutRecipe('acme', 'x').fields, category: { kind: 'const', value: 'nonsense' } },
   });
   const { id } = newItem(invoiceText());
   assert.equal(await processItem(id, deps()), 'done');
-  assert.equal(getItem(id)!.fields?.category, 'אינטרנט');
+  assert.equal(getItem(id)!.fields?.category, 'הוצאות דואר ותקשורת');
 });
 
 test('scan: no AI → unreadable_pdf; AI without PDF support → scan_needs_api_ai; PDF-capable AI → proceeds', async () => {
@@ -672,7 +673,7 @@ test('ready item without a vendor is never filed → needs_attention/missing_ven
   const { id } = newItem(invoiceText());
   getDb().prepare(`UPDATE items SET fields_json = ?, state = 'ready' WHERE id = ?`).run(JSON.stringify({
     vendorName: 'Demo Widgets Ltd', vendorTaxId: null, docType: 'tax_invoice', docNumber: '1001', issueDate: '2026-06-05',
-    total: 117, vat: null, net: null, currency: 'ILS', allocationNumber: null, description: 'x', category: 'תוכנות',
+    total: 117, vat: null, net: null, currency: 'ILS', allocationNumber: null, description: 'x', category: 'תוכנה',
   }), id);
   assert.equal(await processItem(id, deps({ storage })), 'needs_attention');
   assert.equal(getItem(id)!.reason, 'missing_vendor');
@@ -815,7 +816,7 @@ test('no-match AI recipe that falls back to aiAlways keeps the previous working 
 });
 
 test('no-match AI recipe keeps a user-set aiAlways', async () => {
-  knownVendor('demo-widgets-ltd', 'a@acme.example', 'business', 'תוכנות', { aiAlways: true });
+  knownVendor('demo-widgets-ltd', 'a@acme.example', 'business', 'תוכנה', { aiAlways: true });
   const ai = fakeAi();
   const b1 = newItem(invoiceText({ num: '1' }), { sender: 'b@other.example' });
   assert.equal(await processItem(b1.id, deps({ ai })), 'done');
@@ -868,7 +869,7 @@ test('put reporting existed:true is a conflict → next _N name', async () => {
 });
 
 test('no-match AI recipe cannot be merged with a marker-only recipe → existing recipe kept, noted', async () => {
-  knownVendor('demo-widgets-ltd', 'unused@x.example', 'business', 'תוכנות', { match: { textMarkers: ['ACME-MARK'] } });
+  knownVendor('demo-widgets-ltd', 'unused@x.example', 'business', 'תוכנה', { match: { textMarkers: ['ACME-MARK'] } });
   const ai = fakeAi();
   const b1 = newItem(invoiceText({ num: '1' }), { sender: 'b@other.example' });
   assert.equal(await processItem(b1.id, deps({ ai })), 'done');
@@ -880,7 +881,7 @@ test('no-match AI recipe cannot be merged with a marker-only recipe → existing
 
 /** A layout recipe that tells a tax invoice from a receipt (and reads either number). */
 function pairVendor() {
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: {
       ...layoutRecipe('acme', 'x').fields,
       docType: { kind: 'regex', pattern: '^(Tax Invoice|Receipt) ', flags: 'm', parse: 'docType' },
@@ -925,7 +926,7 @@ test('a receipt naming the invoice number pairs with it even when an amount-only
 
 test('reapplyVendorRecipe: fixed recipe re-reads unfiled documents; hand-fixed and filed ones are left alone', async () => {
   // A recipe that reads the total from the wrong line: every document fails validation (no total).
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.]+)', parse: 'amount' } },
   });
   const a = newItem(invoiceText({ num: '1001' }), { mode: 'backfill' });
@@ -940,7 +941,7 @@ test('reapplyVendorRecipe: fixed recipe re-reads unfiled documents; hand-fixed a
   assert.deepEqual(r, { checked: 2, updated: 2 });
   assert.equal(getItem(a.id)!.state, 'awaiting_backfill_approval');
   assert.equal(getItem(a.id)!.fields?.total, 117);
-  assert.equal(getItem(a.id)!.fields?.category, 'תוכנות');
+  assert.equal(getItem(a.id)!.fields?.category, 'תוכנה');
   assert.equal(getItem(b.id)!.fields?.total, 200);
   assert.ok(notes(a.id).includes('recipe_reapplied'));
   assert.equal(getItem(c.id)!.state, 'needs_attention');
@@ -962,7 +963,7 @@ test('reapplyVendorRecipe: a recipe that still reads wrong keeps the previous fi
 });
 
 test('reparseItem: one document re-read with the current recipe, even after a hand edit', async () => {
-  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנה', {
     fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.]+)', parse: 'amount' } },
   });
   const a = newItem(invoiceText({ num: '1001' }), { mode: 'backfill' });

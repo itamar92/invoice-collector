@@ -34,7 +34,7 @@ const recipe = (): Recipe => ({
 function setup(status: 'business' | 'personal' = 'business') {
   saveRecipe(recipe(), 'starter');
   setVendorStatus('demo', status);
-  setVendorCategory('demo', 'תוכנות');
+  setVendorCategory('demo', 'תוכנה');
 }
 function fakeStorage(seed: Record<string, Buffer> = {}) {
   const files = new Map(Object.entries(seed));
@@ -128,7 +128,7 @@ test('backfillList: proposed names, likelyDuplicate from storage, attention rows
   const withName = base.filter((r) => r.filename);
   assert.equal(withName.length, 2);
   assert.ok(withName[0].filename!.endsWith('.pdf'));
-  assert.equal(withName[0].folder, '/Inv/2026/תוכנות');
+  assert.equal(withName[0].folder, '/Inv/2026/תוכנה');
   assert.equal(withName[0].vendor, 'Demo Widgets Ltd');
   assert.equal(withName[0].total, 117);
   assert.ok(withName.every((r) => !r.likelyDuplicate && r.state === 'awaiting_backfill_approval'));

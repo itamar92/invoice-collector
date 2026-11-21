@@ -95,6 +95,8 @@ test('aiWriteRecipe: wrong first, right second -> no aiAlways', async () => {
   const p = fake([bad, goodRecipe]);
   const r = await aiWriteRecipe(p, { text: TEXT, sender: 'a@demo.co', fields: FIELDS });
   assert.equal(r.aiAlways, undefined);
+  // The retry tells the AI what its recipe read wrong.
+  assert.match(p.calls[1].user, /total: expected 117, the recipe read null/);
 });
 
 test('aiWriteRecipe: empty match (R12) and unsafe pattern are AiOutputError', async () => {

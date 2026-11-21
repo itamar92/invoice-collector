@@ -32,6 +32,15 @@ export function parseAmount(raw: string): number | null {
   return negative ? -magnitude : magnitude;
 }
 
+/**
+ * Undoes a right-to-left PDF text layer that wrote an amount's two halves in reverse order: "99 . 88" is 88.99,
+ * "01 . -10" is -10.01. The halves around the decimal point swap; input with no point is left as it is.
+ */
+export function unmirrorAmount(raw: string): string {
+  const m = /^\s*(\S+?)\s*\.\s*(\S+?)\s*$/.exec(normalize(raw).replace(CURRENCY_MARKERS, ''));
+  return m ? `${m[2]}.${m[1]}` : raw;
+}
+
 const DATE_PATTERNS: Record<DateFormat, { re: RegExp; order: 'dmy' | 'ymd'; yearDigits: 2 | 4 }> = {
   'DD/MM/YYYY': { re: /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, order: 'dmy', yearDigits: 4 },
   'DD.MM.YYYY': { re: /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/, order: 'dmy', yearDigits: 4 },

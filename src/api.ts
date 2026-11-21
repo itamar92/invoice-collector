@@ -27,6 +27,11 @@ export interface AiUsageSummary { today: AiUsageTotals; month: AiUsageTotals; to
 export type ReparseOutcome = 'updated' | 'same' | 'invalid' | 'no_recipe' | 'ai_always' | 'no_match' | 'not_editable' | 'busy';
 /** After a recipe change: the vendor's unfiled documents read again with it. */
 export interface Reapplied { checked: number; updated: number }
+/** A recipe run on one document, field by field, next to the document's correct values. */
+export interface RecipeCheck {
+  ok: boolean;
+  fields: { field: 'issueDate' | 'total' | 'docNumber' | 'vat' | 'net'; expected: string | number | null; got: string | number | null; required: boolean; ok: boolean }[];
+}
 export interface ItemEvent { at: string; from: string | null; to: string; note: string | null }
 /** emailMode 'backfill': the item can be filed but is never sent to Morning, so the UI offers no "send". */
 export type ItemDetail = Item & {
@@ -160,7 +165,9 @@ export const api = {
   saveRecipe: (key: string, recipe: unknown) => send<{ ok: true; id: number; reapplied: Reapplied }>('PUT', `/api/vendors/${enc(key)}/recipe`, recipe),
   /** An AI-written draft of the vendor's recipe from one of its documents; not saved. */
   regenerateRecipe: (key: string, itemId: string, comment: string) =>
-    send<{ recipe: Record<string, unknown>; reproduces: boolean; usage: AiUsageTotals }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
+    send<{ recipe: Record<string, unknown>; reproduces: boolean; check: RecipeCheck; text: string; usage: AiUsageTotals }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
+  testRecipe: (key: string, itemId: string, recipe: unknown) =>
+    send<{ check: RecipeCheck; text: string }>('POST', `/api/vendors/${enc(key)}/recipe/test`, { itemId, recipe }),
   setAiAlways: (key: string, value: boolean) => send<{ ok: true; reapplied: Reapplied }>('PUT', `/api/vendors/${enc(key)}/ai-always`, { value }),
 
   backfill: (quiet = false) => get<BackfillStatus>('/api/backfill', quiet),

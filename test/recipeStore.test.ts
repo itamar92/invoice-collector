@@ -69,8 +69,8 @@ test('vendors: new is unreviewed, status never downgraded, sorted list, category
   upsertVendor('a-vendor', 'א חדש');
   assert.equal(getVendor('a-vendor')?.status, 'business');
   assert.equal(getVendor('a-vendor')?.displayName, 'א חדש');
-  setVendorCategory('a-vendor', 'דלק');
-  assert.equal(getVendor('a-vendor')?.defaultCategory, 'דלק');
+  setVendorCategory('a-vendor', 'רכב - דלק');
+  assert.equal(getVendor('a-vendor')?.defaultCategory, 'רכב - דלק');
   assert.equal(getVendor('nope'), null);
   assert.deepEqual(listVendors().map(v => v.key), ['a-vendor', 'b-vendor']);
 });
@@ -86,11 +86,11 @@ test('loadStarterRecipes is idempotent, sorted, applies sidecar categories, repo
   const dir = mkdtempSync(join(tmpdir(), 'recipes-'));
   writeFileSync(join(dir, 'b.json'), JSON.stringify(recipe({ vendorKey: 'vendor-b', displayName: 'B' })));
   writeFileSync(join(dir, 'a.json'), JSON.stringify(recipe({ vendorKey: 'vendor-a', displayName: 'A' })));
-  writeFileSync(join(dir, 'vendors.json'), JSON.stringify({ 'vendor-a': { displayName: 'A', defaultCategory: 'דלק' } }));
+  writeFileSync(join(dir, 'vendors.json'), JSON.stringify({ 'vendor-a': { displayName: 'A', defaultCategory: 'רכב - דלק' } }));
   assert.equal(loadStarterRecipes(dir), 2);
   assert.equal(loadStarterRecipes(dir), 0);
   assert.equal(recipeHistory('vendor-a').length, 1);
-  assert.equal(getVendor('vendor-a')?.defaultCategory, 'דלק');
+  assert.equal(getVendor('vendor-a')?.defaultCategory, 'רכב - דלק');
   assert.equal(getVendor('vendor-b')?.defaultCategory, null);
   assert.equal(getVendor('vendor-a')?.status, 'unreviewed');
   writeFileSync(join(dir, 'c.json'), '{"schemaVersion":1}');

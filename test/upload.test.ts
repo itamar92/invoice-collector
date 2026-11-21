@@ -26,7 +26,7 @@ const NOW = new Date('2026-06-15T09:00:00Z');
 const FIELDS: ExtractedFields = {
   vendorName: 'תחנת דלק דמו', vendorTaxId: '510000001', docType: 'tax_invoice_receipt', docNumber: '7781',
   issueDate: '2026-06-14', total: 236, vat: 36, net: 200, currency: 'ILS', allocationNumber: null,
-  description: 'תדלוק', category: 'דלק',
+  description: 'תדלוק', category: 'רכב - דלק',
 };
 
 const servers: Server[] = [];

@@ -19,7 +19,7 @@ const CHAT = 4242;
 const FIELDS: ExtractedFields = {
   vendorName: 'סופר דמו', vendorTaxId: '510000002', docType: 'tax_invoice_receipt', docNumber: '9001',
   issueDate: '2026-06-14', total: 118, vat: 18, net: 100, currency: 'ILS', allocationNumber: null,
-  description: 'כיבוד', category: 'כיבודים ואוכל',
+  description: 'כיבוד', category: 'כיבודים',
 };
 
 beforeEach(() => {
@@ -61,7 +61,7 @@ test('a photo from an allowed chat becomes an item and the chat is told the outc
   assert.equal(sent.length, 2);
   assert.match(sent[0].text, /קורא/);
   assert.match(sent[1].text, /ספק חדש/);
-  assert.match(sent[1].text, /סופר דמו · 118\.00 ILS · 14\/06\/2026 · כיבודים ואוכל/);
+  assert.match(sent[1].text, /סופר דמו · 118\.00 ILS · 14\/06\/2026 · כיבודים/);
   assert.ok(sent[1].text.endsWith(`https://inv.example.test/items/${item.id}`));
 });
 

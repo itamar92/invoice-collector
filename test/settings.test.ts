@@ -7,8 +7,8 @@ import { getSettings, updateSettings } from '../server/settings.js';
 test('defaults come from IL_DEFAULTS until changed', () => {
   openDb(':memory:');
   assert.equal(getSettings().vatRate, 18);
-  assert.equal(getSettings().categories.find(c => c.name === 'הוצאות רפואיות')!.sendToAccounting, false);
-  assert.equal(getSettings().categories.find(c => c.name === 'תרומות')!.sendToAccounting, true);
+  assert.equal(getSettings().categories.length, 33);
+  assert.ok(getSettings().categories.every(c => c.sendToAccounting));
   updateSettings({ vatRate: 17 });
   assert.equal(getSettings().vatRate, 17);
   assert.equal(getSettings().currency, 'ILS');
@@ -18,10 +18,10 @@ test('settings persist per database and IL_DEFAULTS is never mutated', () => {
   openDb(':memory:');
   updateSettings({ gmailLabel: 'invoices' });
   assert.equal(getSettings().gmailLabel, 'invoices');
-  const cats = getSettings().categories.map(c => c.name === 'דלק' ? { ...c, sendToAccounting: false } : c);
+  const cats = getSettings().categories.map(c => c.name === 'רכב - דלק' ? { ...c, sendToAccounting: false } : c);
   updateSettings({ categories: cats });
-  assert.equal(getSettings().categories.find(c => c.name === 'דלק')!.sendToAccounting, false);
-  assert.equal(IL_DEFAULTS.categories.find(c => c.name === 'דלק')!.sendToAccounting, true);
+  assert.equal(getSettings().categories.find(c => c.name === 'רכב - דלק')!.sendToAccounting, false);
+  assert.equal(IL_DEFAULTS.categories.find(c => c.name === 'רכב - דלק')!.sendToAccounting, true);
   // mutating a returned object must not leak into the defaults either
   getSettings().categories[0].name = 'x';
   assert.notEqual(IL_DEFAULTS.categories[0].name, 'x');

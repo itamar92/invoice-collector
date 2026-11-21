@@ -167,6 +167,8 @@ test('recipe regenerate: drafts from a vendor document with the owner\'s notes, 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.reproduces, true);
+  assert.equal(body.check.ok, true);
+  assert.match(body.text, /סלולר דמו/);
   assert.equal(body.recipe.vendorKey, 'demo-cell'); // ours, not the AI's
   assert.equal(body.recipe.displayName, 'סלולר דמו');
   assert.equal(body.recipe.aiAlways, undefined); // the vendor's choice, not the AI's
@@ -183,6 +185,33 @@ test('recipe regenerate: drafts from a vendor document with the owner\'s notes, 
   assert.equal((await call('POST', '/api/vendors/nope/recipe/regenerate', { itemId: id })).status, 404);
   const off = await boot({ getAi: () => null });
   assert.equal((await off.call('POST', '/api/vendors/demo-cell/recipe/regenerate', { itemId: id })).status, 400);
+});
+
+test('recipe test: runs an unsaved recipe on a vendor document, field by field', async () => {
+  saveRecipe(compileRecipe(recipeJson()), 'user');
+  const id = item('needs_attention', { total: 88.99, issueDate: '2026-06-01' }, 'try');
+  setItemVendor(id, 'demo-cell');
+  setItemText(id, 'סלולר דמו\nתאריך: 01/06/2026\nסה"כ: 99 . 88 {');
+  const { call } = await boot();
+  const draft = (total: Record<string, unknown>) => ({
+    schemaVersion: 1, vendorKey: 'demo-cell', displayName: 'סלולר דמו', match: { senders: ['billing@demo-cell.co.il'] },
+    fields: {
+      issueDate: { kind: 'regex', pattern: 'תאריך:\\s*(\\d{2}/\\d{2}/\\d{4})', parse: 'date', dateFormat: 'DD/MM/YYYY' },
+      total: { kind: 'regex', pattern: 'סה"כ:\\s*(\\d+ \\. \\d+)', parse: 'amount', ...total },
+    },
+  });
+  const before = (await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length;
+  const miss = await (await call('POST', '/api/vendors/demo-cell/recipe/test', { itemId: id, recipe: draft({}) })).json();
+  assert.equal(miss.check.ok, false);
+  assert.deepEqual(miss.check.fields.find((f: any) => f.field === 'total'), { field: 'total', expected: 88.99, got: 99.88, required: true, ok: false });
+  assert.match(miss.text, /99 \. 88/);
+  const hit = await (await call('POST', '/api/vendors/demo-cell/recipe/test', { itemId: id, recipe: draft({ mirrored: true }) })).json();
+  assert.equal(hit.check.ok, true);
+  assert.equal((await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length, before); // nothing saved
+
+  assert.equal((await call('POST', '/api/vendors/demo-cell/recipe/test', { itemId: id, recipe: { nope: 1 } })).status, 400);
+  upsertVendor('other', 'אחר');
+  assert.equal((await call('POST', '/api/vendors/other/recipe/test', { itemId: id, recipe: draft({}) })).status, 404);
 });
 
 test('items list filters by vendor', async () => {
@@ -304,13 +333,13 @@ test('stats: filed documents per category and month for a year; other states, ye
     const id = item('awaiting_vendor', { docNumber: tag, ...fields }, tag);
     getDb().prepare('UPDATE items SET state = ? WHERE id = ?').run(state, id);
   };
-  filed('a', { category: 'טלפון', total: 100, issueDate: '2026-01-10' });
-  filed('b', { category: 'טלפון', total: 50.5, issueDate: '2026-03-02' }, 'stored');
-  filed('c', { category: 'תוכנות', total: 30, issueDate: '2026-03-20' });
+  filed('a', { category: 'הוצאות טלפון נייד', total: 100, issueDate: '2026-01-10' });
+  filed('b', { category: 'הוצאות טלפון נייד', total: 50.5, issueDate: '2026-03-02' }, 'stored');
+  filed('c', { category: 'תוכנה', total: 30, issueDate: '2026-03-20' });
   filed('d', { category: null, total: 7, issueDate: '2026-12-31' });
-  filed('e', { category: 'תוכנות', total: 999, currency: 'USD', issueDate: '2026-05-05' });
-  filed('f', { category: 'טלפון', total: 80, issueDate: '2025-11-11' });
-  item('needs_attention', { docNumber: 'g', category: 'טלפון', total: 500, issueDate: '2026-02-02' }, 'g');
+  filed('e', { category: 'תוכנה', total: 999, currency: 'USD', issueDate: '2026-05-05' });
+  filed('f', { category: 'הוצאות טלפון נייד', total: 80, issueDate: '2025-11-11' });
+  item('needs_attention', { docNumber: 'g', category: 'הוצאות טלפון נייד', total: 500, issueDate: '2026-02-02' }, 'g');
   const { call } = await boot();
 
   const s = (await (await call('GET', '/api/stats')).json()) as any; // the clock says 2026
@@ -320,19 +349,19 @@ test('stats: filed documents per category and month for a year; other states, ye
   assert.equal(s.total, 187.5);
   assert.equal(s.otherCurrency, 1);
   assert.deepEqual(s.categories, [
-    { category: 'טלפון', count: 2, total: 150.5 },
-    { category: 'תוכנות', count: 2, total: 30 },
+    { category: 'הוצאות טלפון נייד', count: 2, total: 150.5 },
+    { category: 'תוכנה', count: 2, total: 30 },
     { category: null, count: 1, total: 7 },
   ]);
   assert.equal(s.months.length, 12);
   assert.deepEqual(s.months[2].parts.sort((a: any, b: any) => a.category.localeCompare(b.category)),
-    [{ category: 'טלפון', count: 1 }, { category: 'תוכנות', count: 1 }]);
+    [{ category: 'הוצאות טלפון נייד', count: 1 }, { category: 'תוכנה', count: 1 }]);
   assert.deepEqual({ ...s.months[2], parts: null }, { month: 3, count: 2, total: 80.5, parts: null });
-  assert.deepEqual(s.months[4], { month: 5, count: 1, total: 0, parts: [{ category: 'תוכנות', count: 1 }] });
+  assert.deepEqual(s.months[4], { month: 5, count: 1, total: 0, parts: [{ category: 'תוכנה', count: 1 }] });
   assert.deepEqual(s.months[5].parts, []);
 
   const prev = (await (await call('GET', '/api/stats?year=2025')).json()) as any;
-  assert.deepEqual(prev.categories, [{ category: 'טלפון', count: 1, total: 80 }]);
+  assert.deepEqual(prev.categories, [{ category: 'הוצאות טלפון נייד', count: 1, total: 80 }]);
   assert.equal((await call('GET', '/api/stats?year=nope')).status, 400);
 });
 
@@ -373,11 +402,11 @@ test('vendor decision runs through setVendorDecision when connected; persists (2
   assert.equal(getVendor('acme')!.status, 'ignored');
   assert.equal(getItem(id)!.state, 'ignored');
   const down = await boot({ getDeps: () => { throw new Error('gmail not connected') } });
-  const r2 = await down.call('PUT', '/api/vendors/acme', { status: 'business', defaultCategory: 'מים' });
+  const r2 = await down.call('PUT', '/api/vendors/acme', { status: 'business', defaultCategory: 'מים - פרטי ועסקי' });
   assert.equal(r2.status, 200);
   assert.equal(((await r2.json()) as any).processed, false);
   assert.equal(getVendor('acme')!.status, 'business');
-  assert.equal(getVendor('acme')!.defaultCategory, 'מים');
+  assert.equal(getVendor('acme')!.defaultCategory, 'מים - פרטי ועסקי');
 });
 
 test('worker/run awaits the tick and returns the summary; 503 without a worker', async () => {

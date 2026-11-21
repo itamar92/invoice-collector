@@ -69,9 +69,9 @@ setSecret('dropbox_refresh', 'demo-not-a-real-token');
 
 // ---------- vendors ----------
 const VENDORS: { key: string; name: string; status: VendorStatus; category?: string; sender: string }[] = [
-  { key: 'demo-cell', name: 'סלולר לדוגמה', status: 'business', category: 'טלפון', sender: 'billing@demo-cell.example' },
-  { key: 'demo-hosting', name: 'אחסון לדוגמה', status: 'business', category: 'תוכנות', sender: 'invoices@demo-hosting.example' },
-  { key: 'demo-clinic', name: 'מרפאה לדוגמה', status: 'personal', category: 'הוצאות רפואיות', sender: 'office@demo-clinic.example' },
+  { key: 'demo-cell', name: 'סלולר לדוגמה', status: 'business', category: 'הוצאות טלפון נייד', sender: 'billing@demo-cell.example' },
+  { key: 'demo-hosting', name: 'אחסון לדוגמה', status: 'business', category: 'תוכנה', sender: 'invoices@demo-hosting.example' },
+  { key: 'demo-clinic', name: 'מרפאה לדוגמה', status: 'personal', category: 'עלויות אחרות', sender: 'office@demo-clinic.example' },
   { key: 'demo-newsletter', name: 'ניוזלטר לדוגמה', status: 'ignored', sender: 'news@demo-newsletter.example' },
   { key: 'demo-studio', name: 'אולפן לדוגמה', status: 'unreviewed', sender: 'pay@demo-studio.example' },
   { key: 'demo-print', name: 'דפוס לדוגמה', status: 'unreviewed', sender: 'print@demo-print.example' },
@@ -145,8 +145,8 @@ seedItem({ vendor: cell, state: 'done', total: 99.9, storagePath: `/חשבוני
 // A spread of filed documents over the year, so the dashboard has something to show.
 const FILED: [(typeof VENDORS)[number], number, string | undefined][] = [
   [cell, 99.9, undefined], [hosting, 47.2, undefined], [clinic, 320, undefined], [cell, 104.5, undefined],
-  [hosting, 47.2, 'ציוד משרדי'], [cell, 99.9, undefined], [hosting, 189, 'קידום ופרסום'], [clinic, 180, undefined],
-  [cell, 112.3, undefined], [hosting, 47.2, undefined], [hosting, 640, 'ציוד משרדי'], [cell, 99.9, undefined],
+  [hosting, 47.2, 'ציוד לעסק'], [cell, 99.9, undefined], [hosting, 189, 'פרסום וקידום מכירות'], [clinic, 180, undefined],
+  [cell, 112.3, undefined], [hosting, 47.2, undefined], [hosting, 640, 'ציוד לעסק'], [cell, 99.9, undefined],
   [hosting, 47.2, undefined], [cell, 99.9, undefined], [hosting, 75, undefined],
 ];
 const thisMonth = new Date().getMonth() + 1;

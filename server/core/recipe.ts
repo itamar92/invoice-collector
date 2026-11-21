@@ -1,7 +1,7 @@
 import RE2 from 're2';
 import { z } from 'zod';
 import { DOC_TYPE_HE, type DocType, type ExtractedFields } from './types.js';
-import { hebrewMonthName, normalize, parseAmount, parseDate, parseDocType, type DateFormat } from './parse.js';
+import { hebrewMonthName, normalize, parseAmount, parseDate, parseDocType, unmirrorAmount, type DateFormat } from './parse.js';
 
 export class RecipeError extends Error {
   constructor(message: string) {
@@ -19,6 +19,8 @@ export type FieldRule =
       group?: number;
       parse: 'text' | 'amount' | 'date' | 'docType';
       dateFormat?: DateFormat;
+      /** amount only: the text layer wrote the amount right to left ("99 . 88" for 88.99), so swap the halves. */
+      mirrored?: boolean;
     }
   | { kind: 'const'; value: string };
 
@@ -48,6 +50,7 @@ const RegexRule = z.object({
   group: z.number().int().min(0).max(20).optional(),
   parse: z.enum(['text', 'amount', 'date', 'docType']),
   dateFormat: z.enum(DATE_FORMATS).optional(),
+  mirrored: z.boolean().optional(),
 });
 const ConstRule = z.object({ kind: z.literal('const'), value: z.string().max(300) });
 const FieldRuleSchema = z.discriminatedUnion('kind', [RegexRule, ConstRule]);
@@ -73,6 +76,7 @@ const RecipeShape = z.object({
       const expected = AMOUNT_FIELDS.has(name) ? 'amount' : name === 'issueDate' ? 'date' : name === 'docType' ? 'docType' : 'text';
       if (rule.parse !== expected) bad(`field ${name} requires parse "${expected}"`);
       if (rule.parse === 'date' && !rule.dateFormat) bad('dateFormat is required for parse "date"');
+      if (rule.mirrored && rule.parse !== 'amount') bad('mirrored is only allowed with parse "amount"');
     }
   }),
   description: z.string().max(300).optional().superRefine((tpl, ctx) => {
@@ -206,7 +210,7 @@ function extract(rule: Extract<FieldRule, { kind: 'regex' }>, re: RE2, text: str
   if (raw === undefined) return null;
   switch (rule.parse) {
     case 'text': return raw.trim() || null;
-    case 'amount': return parseAmount(raw);
+    case 'amount': return parseAmount(rule.mirrored ? unmirrorAmount(raw) : raw);
     case 'date': return parseDate(raw, rule.dateFormat as DateFormat);
     case 'docType': return parseDocType(raw);
   }
@@ -243,4 +247,41 @@ export function runRecipe(r: Recipe, rawText: string): ExtractedFields {
     out.description = renderDescription(r.description, out.issueDate, out.docNumber);
   }
   return out;
+}
+
+/** The fields a recipe must read right, and the ones it is also checked on when the document has them. */
+const CHECK_REQUIRED: readonly FieldName[] = ['issueDate', 'total'];
+const CHECK_OPTIONAL: readonly FieldName[] = ['docNumber', 'vat', 'net'];
+
+export interface RecipeCheckField {
+  field: FieldName;
+  expected: string | number | null;
+  got: string | number | null;
+  required: boolean;
+  ok: boolean;
+}
+export interface RecipeCheck { ok: boolean; fields: RecipeCheckField[] }
+
+/**
+ * Runs the recipe on the text and compares it, field by field, with the document's correct values. It passes when
+ * the date and the total match; the other checked fields are reported so the owner sees what else it reads.
+ */
+export function checkRecipe(r: Recipe, text: string, expected: ExtractedFields): RecipeCheck {
+  const got = runRecipe(r, text);
+  const fields: RecipeCheckField[] = [];
+  for (const field of [...CHECK_REQUIRED, ...CHECK_OPTIONAL]) {
+    const required = CHECK_REQUIRED.includes(field);
+    const want = expected[field] as string | number | null;
+    const read = got[field] as string | number | null;
+    if (!required && want === null && !r.fields[field]) continue;
+    fields.push({ field, expected: want, got: read, required, ok: want === read });
+  }
+  return { ok: fields.every((f) => !f.required || f.ok), fields };
+}
+
+/** The check as plain lines, for telling the AI what its last recipe got wrong. */
+export function describeCheck(c: RecipeCheck): string {
+  return c.fields.filter((f) => !f.ok)
+    .map((f) => `${f.field}: expected ${JSON.stringify(f.expected)}, the recipe read ${JSON.stringify(f.got)}`)
+    .join('\n');
 }
