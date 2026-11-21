@@ -12,6 +12,10 @@ import {
   GmailClient, INVOICE_QUERY, ingestMessage, markHandledIfComplete, buildMime, bareAddress,
 } from '../server/sources/gmail.js';
 import type { GmailMessage, GmailSource } from '../server/sources/gmail.js';
+import { readFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
+import { getItemPdf } from '../server/core/items.js';
+import { jpegToPdf } from '../server/core/imagePdf.js';
 
 process.env.SECRET_KEY = 'test-key-for-unit-tests-only-0123456789';
 process.env.APP_PASSWORD = 'pw';
@@ -54,6 +58,32 @@ test('two PDFs make two items', async () => {
   assert.equal(listItems({ messageId: 'm1' }).length, 2);
   assert.equal(getEmail('m1')?.mode, 'backfill');
   assert.equal(getEmail('m1')?.sender, 'a@b.test');
+});
+
+const JPEG = readFileSync(new URL('./fixtures/receipt-photo.jpg', import.meta.url));
+/** Minimal valid 2x1 RGB PNG. */
+function tinyPng(): Buffer {
+  const c = (t: string, b: Buffer) => { const l = Buffer.alloc(4); l.writeUInt32BE(b.length); return Buffer.concat([l, Buffer.from(t), b, Buffer.alloc(4)]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(2, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), c('IHDR', ihdr),
+    c('IDAT', deflateSync(Buffer.from([0, 255, 0, 0, 0, 0, 255]))), c('IEND', Buffer.alloc(0))]);
+}
+
+test('JPEG/PNG attachments of an email without a PDF become one-page PDF items; broken ones a placeholder', async () => {
+  const { g } = fakeGmail({
+    m1: msg('m1', { images: [{ name: 'Receipt.JPG', data: JPEG }, { name: 'scan.png', data: tinyPng() }, { name: 'x.png', data: Buffer.from('nope') }] }),
+    m2: msg('m2', { pdfs: [{ name: 'a.pdf', data: pdf('1') }], images: [{ name: 'photo.jpg', data: JPEG }] }),
+  });
+  await ingestMessage(g, 'm1', 'ongoing');
+  const items = listItems({ messageId: 'm1' });
+  const byName = Object.fromEntries(items.map((i) => [i.attachmentName, i]));
+  assert.deepEqual(Object.keys(byName).sort(), ['Receipt.pdf', 'scan.pdf', 'x.png']);
+  assert.equal(byName['Receipt.pdf'].state, 'queued');
+  assert.deepEqual(getItemPdf(byName['Receipt.pdf'].id), jpegToPdf(JPEG));
+  assert.ok(getItemPdf(byName['scan.pdf'].id)!.subarray(0, 5).equals(Buffer.from('%PDF-')));
+  assert.equal(byName['x.png'].reason, 'no_document');
+  await ingestMessage(g, 'm2', 'ongoing');
+  assert.deepEqual(listItems({ messageId: 'm2' }).map((i) => i.attachmentName), ['a.pdf'], 'images ignored next to a PDF');
 });
 
 test('an attachment named .pdf that is not a PDF becomes a placeholder needing attention, never an item', async () => {
@@ -193,12 +223,16 @@ test('fetchMessage walks MIME parts, decodes PDFs, bare lowercase sender', async
         { mimeType: 'application/pdf', filename: 'inline.pdf', body: { data: b64(pdf('inline')) } },
         { mimeType: 'application/octet-stream', filename: 'Big.PDF', body: { attachmentId: 'att1' } },
         { mimeType: 'image/png', filename: 'x.png', body: { attachmentId: 'att2' } },
+        { mimeType: 'image/png', filename: 'logo.png', body: { attachmentId: 'att3', size: 2000 } },
+        { mimeType: 'image/jpeg', filename: 'IMG_1.jpeg', body: { attachmentId: 'att4', size: 20_000 } },
+        { mimeType: 'image/jpeg', filename: '', body: { attachmentId: 'att5', size: 20_000 } },
       ],
     },
   };
   const f = fakeFetch((c) => {
     if (isToken(c)) return json(200, { access_token: 'AT', expires_in: 3600 });
     if (c.url.includes('/attachments/att1')) return json(200, { data: b64(pdf('big')) });
+    if (c.url.includes('/attachments/att4')) return json(200, { data: b64(Buffer.alloc(20_000, 1)) });
     return json(200, full);
   });
   const m = await new GmailClient({ fetchImpl: f.impl }).fetchMessage('m1');
@@ -209,7 +243,8 @@ test('fetchMessage walks MIME parts, decodes PDFs, bare lowercase sender', async
   assert.equal(m.html, '<p>hi</p>');
   assert.deepEqual(m.pdfs.map((p) => p.name), ['inline.pdf', 'Big.PDF']);
   assert.equal(m.pdfs[1].data.toString(), '%PDF-1.4 big');
-  assert.ok(!f.calls.some((c) => c.url.includes('att2')));
+  assert.ok(!f.calls.some((c) => /att[235]/.test(c.url)), 'small, unsized or unnamed images are not downloaded');
+  assert.deepEqual(m.images?.map((i) => [i.name, i.data.length]), [['IMG_1.jpeg', 20_000]]);
   assert.equal(bareAddress('x@y.z'), 'x@y.z');
 });
 

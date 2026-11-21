@@ -10,11 +10,14 @@ import { AnthropicProvider, type AnthropicLike } from './anthropic.js';
 import { OpenAiProvider, type OpenAiLike } from './openai.js';
 import { GeminiProvider, type GeminiLike } from './gemini.js';
 import { SshAgentProvider, type SshClientFactory } from './sshAgent.js';
+import { inboxDir } from './inbox.js';
 
 export interface AiRequest { system: string; user: string; pdf?: Buffer }
 export interface AiProvider {
   name: string;
   supportsPdf: boolean;
+  /** Attach the PDF only when the document has no text layer (a scan or photo); text goes as text. */
+  pdfOnlyForScans?: boolean;
   completeJson(req: AiRequest): Promise<unknown>;
   ping(): Promise<void>;
 }
@@ -84,6 +87,8 @@ export interface AiDeps {
   gemini?: GeminiLike;
   sshClient?: SshClientFactory;
   getSecret?: (k: SecretKey) => string | null;
+  /** Shared folder for the SSH agent to read documents from; defaults to AI_INBOX_DIR. */
+  inboxDir?: string | null;
 }
 
 class UnavailableProvider implements AiProvider {
@@ -116,8 +121,9 @@ export function getAiProvider(s: Pick<Settings, 'ai'>, deps: AiDeps = {}): AiPro
     case 'ssh': {
       const ssh = s.ai.ssh;
       const key = secret('ssh_private_key');
-      if (!ssh || !key) return new UnavailableProvider('ssh', false, 'no ssh configuration or key');
-      return new SshAgentProvider(ssh, key, deps.sshClient);
+      const inbox = deps.inboxDir !== undefined ? deps.inboxDir : inboxDir();
+      if (!ssh || !key) return new UnavailableProvider('ssh', inbox !== null, 'no ssh configuration or key');
+      return new SshAgentProvider(ssh, key, deps.sshClient, inbox);
     }
   }
 }
@@ -152,12 +158,13 @@ function schemaValidator<T>(schema: ZodType<T, any, any>): (raw: unknown) => T {
 
 export function aiExtract(
   p: AiProvider,
-  input: { text: string; pdf?: Buffer; sender: string; categories: string[] },
+  input: { text: string; pdf?: Buffer; isScan?: boolean; sender: string; categories: string[] },
 ): Promise<ExtractedFields> {
-  const pdf = p.supportsPdf ? input.pdf : undefined;
+  const { isScan, ...rest } = input;
+  const pdf = p.supportsPdf && (!p.pdfOnlyForScans || isScan) ? input.pdf : undefined;
   return askValidated(
     p,
-    { system: EXTRACT_SYSTEM, user: extractUserPrompt({ ...input, hasPdf: pdf !== undefined }), pdf },
+    { system: EXTRACT_SYSTEM, user: extractUserPrompt({ ...rest, hasPdf: pdf !== undefined }), pdf },
     schemaValidator<ExtractedFields>(ExtractedFieldsSchema),
   );
 }

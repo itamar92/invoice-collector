@@ -11,7 +11,7 @@ const REASONS = {
   vat_mismatch: 'המע״מ לא מתאים לסכום',
   missing_vendor: 'חסר שם ספק',
   unreadable_pdf: 'לא ניתן לקרוא את ה-PDF',
-  scan_needs_api_ai: 'מסמך סרוק: צריך ספק AI עם מפתח API (לא SSH) כדי לקרוא אותו',
+  scan_needs_api_ai: 'מסמך סרוק: סוכן ה-SSH צריך תיקייה משותפת (AI_INBOX_DIR) כדי לקרוא אותו, או ספק AI עם מפתח API',
   no_recipe_no_ai: 'אין מתכון לספק הזה וה-AI כבוי',
   ai_failed: 'ה-AI לא הצליח לחלץ את הפרטים',
   unknown_category: 'הקטגוריה לא קיימת בהגדרות',

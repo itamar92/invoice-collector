@@ -13,11 +13,15 @@ services:
       DATA_DIR: /data
       PORT: "3100"
       TRUST_PROXY: "1"
+      # Shared folder the SSH agent reads scans from (docs/SETUP.md, section 5). Emptied after each analysis.
+      AI_INBOX_DIR: /inbox
     # The VM itself, for the SSH AI agent (Settings host: host.docker.internal).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - invoice-data:/data
+      # Host side: owner 1000 (the container's node user), group ic-inbox (the agent user), mode 2750.
+      - /srv/ic-inbox:/inbox
     ports:
       # Localhost only, for checks from the VM itself (curl http://127.0.0.1:3100/healthz).
       - "127.0.0.1:3100:3100"

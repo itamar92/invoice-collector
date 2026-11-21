@@ -133,10 +133,10 @@ export function replyFor(item: Item): string {
 }
 
 /** Document types the bot accepts when a file (not a photo) is sent. */
-const DOC_MIME = new Set(['application/pdf', 'image/jpeg']);
+const DOC_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
 /**
- * The file a message carries: a photo (its largest size) or a PDF/JPEG document. `refuse` is the reply for a
+ * The file a message carries: a photo (its largest size) or a PDF/JPEG/PNG document. `refuse` is the reply for a
  * file the bot does not take; null when the message carries no file at all.
  */
 export function pickFile(msg: TgMessage): { fileId: string; name: string } | { refuse: string } | null {

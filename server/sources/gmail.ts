@@ -5,6 +5,7 @@ import { TransientError } from '../core/types.js';
 import type { Reason } from '../core/types.js';
 import { createEmail, createItem, createPlaceholderItem, getEmail, isTerminal, listItems } from '../core/items.js';
 import { clearIngestFailure } from '../core/ingestFailures.js';
+import { ImageError, imageToPdf } from '../core/imagePdf.js';
 import { LinkError, downloadPdf, findInvoiceLinks } from './links.js';
 import type { DownloadOptions } from './links.js';
 
@@ -17,7 +18,14 @@ const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 export interface GmailMessage {
   id: string; threadId: string; sender: string; subject: string; receivedAt: string;
   pdfs: { name: string; data: Buffer }[]; html: string; text: string;
+  /** JPEG/PNG attachments big enough to be a photographed or scanned invoice (see IMAGE_MIN_BYTES). */
+  images?: { name: string; data: Buffer }[];
 }
+
+/** Smaller image attachments are logos, icons and signature pictures, not invoices. */
+export const IMAGE_MIN_BYTES = 15 * 1024;
+/** At most this many images become items per message (only when it carries no PDF). */
+export const MAX_IMAGES_PER_MESSAGE = 5;
 
 /** What the ingest functions need from Gmail; tests inject a fake. */
 export interface GmailSource {
@@ -117,20 +125,30 @@ export class GmailClient implements GmailSource {
     const msg = await this.api(`${API}/messages/${encodeURIComponent(id)}?format=full`);
     const payload: MessagePart = msg.payload ?? {};
     const pdfs: { name: string; data: Buffer }[] = [];
+    const images: { name: string; data: Buffer }[] = [];
     let html = '';
     let text = '';
     const walk = async (p: MessagePart): Promise<void> => {
       const mime = (p.mimeType ?? '').toLowerCase();
       const name = p.filename ?? '';
       const isPdf = mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf');
-      if (isPdf && (p.body?.attachmentId || p.body?.data)) {
-        let data = p.body.data;
-        if (!data && p.body.attachmentId) {
+      const isImage = name !== '' && (mime === 'image/jpeg' || mime === 'image/jpg' || mime === 'image/png'
+        || /\.(jpe?g|png)$/i.test(name));
+      const body = async (): Promise<Buffer | null> => {
+        let data = p.body?.data;
+        if (!data && p.body?.attachmentId) {
           const a = await this.api(
             `${API}/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(p.body.attachmentId)}`);
           data = a?.data;
         }
-        if (data) pdfs.push({ name: name || `attachment-${pdfs.length + 1}.pdf`, data: Buffer.from(data, 'base64url') });
+        return data ? Buffer.from(data, 'base64url') : null;
+      };
+      if (isPdf && (p.body?.attachmentId || p.body?.data)) {
+        const data = await body();
+        if (data) pdfs.push({ name: name || `attachment-${pdfs.length + 1}.pdf`, data });
+      } else if (isImage && (p.body?.size ?? 0) >= IMAGE_MIN_BYTES && images.length < MAX_IMAGES_PER_MESSAGE) {
+        const data = await body();
+        if (data && data.length >= IMAGE_MIN_BYTES) images.push({ name, data });
       } else if (!name && p.body?.data && (mime === 'text/html' || mime === 'text/plain')) {
         const s = decodeText(Buffer.from(p.body.data, 'base64url'), header(p, 'content-type'));
         if (mime === 'text/html' && !html) html = s;
@@ -144,7 +162,7 @@ export class GmailClient implements GmailSource {
       sender: bareAddress(header(payload, 'from')),
       subject: header(payload, 'subject'),
       receivedAt: new Date(Number(msg.internalDate) || this.now()).toISOString(),
-      pdfs, html, text,
+      pdfs, html, text, images,
     };
   }
 
@@ -282,8 +300,14 @@ export function isPdf(data: Buffer): boolean {
   return Buffer.isBuffer(data) && data.subarray(0, 1024).includes('%PDF-', 0, 'latin1');
 }
 
+/** `photo.jpg` -> `photo.pdf` */
+function pdfName(name: string): string {
+  return `${name.replace(/\.(jpe?g|png)$/i, '') || 'image'}.pdf`;
+}
+
 /**
- * Ingests one Gmail message: PDFs become items; with no PDFs, invoice links are downloaded;
+ * Ingests one Gmail message: PDFs become items; with no PDF attachment, JPEG/PNG attachments become one-page
+ * PDFs; with neither, invoice links are downloaded;
  * if nothing usable is found a placeholder item keeps the email visible. Already-ingested ids are skipped.
  */
 export async function ingestMessage(
@@ -297,6 +321,14 @@ export async function ingestMessage(
   // An attachment called .pdf that is not one (no %PDF- header) is never stored as a document.
   let pdfs = msg.pdfs.filter((p) => isPdf(p.data));
   const notPdf = msg.pdfs.filter((p) => !isPdf(p.data));
+  if (msg.pdfs.length === 0) {
+    for (const img of msg.images ?? []) {
+      try { pdfs.push({ name: pdfName(img.name), data: imageToPdf(img.data) }); } catch (e) {
+        if (!(e instanceof ImageError)) throw e;
+        notPdf.push(img); // a broken image stays visible as a placeholder, like a fake .pdf
+      }
+    }
+  }
   let failure: Reason | null = null;
   if (pdfs.length === 0 && notPdf.length === 0) {
     const got: { name: string; data: Buffer }[] = [];

@@ -99,9 +99,9 @@ function fakeAccounting() {
 }
 
 /** AI fake: extraction reads the synthetic layout; recipe writing returns layoutRecipe with a junk vendorKey. */
-function fakeAi(o: { supportsPdf?: boolean; category?: string | null } = {}) {
+function fakeAi(o: { supportsPdf?: boolean; pdfOnlyForScans?: boolean; category?: string | null } = {}) {
   const ai = {
-    name: 'fake', supportsPdf: o.supportsPdf ?? true,
+    name: 'fake', supportsPdf: o.supportsPdf ?? true, pdfOnlyForScans: o.pdfOnlyForScans,
     extractCalls: 0, recipeCalls: 0, requests: [] as AiRequest[],
     unavailable: false, outputError: false, overrideFields: null as Partial<ExtractedFields> | null,
     async completeJson(req: AiRequest): Promise<unknown> {
@@ -557,6 +557,19 @@ test('scan: no AI → unreadable_pdf; AI without PDF support → scan_needs_api_
   const c = newItem('  ');
   assert.equal(await processItem(c.id, deps({ ai })), 'awaiting_vendor');
   assert.ok(ai.requests[0]!.pdf, 'PDF sent to the AI');
+});
+
+test('a provider that reads files only for scans (ssh + inbox) gets the PDF for a scan, text for a text PDF', async () => {
+  const ai = fakeAi({ pdfOnlyForScans: true });
+  ai.overrideFields = { vendorName: 'Scan Co', docNumber: '9', issueDate: '2026-06-01', total: 50 };
+  const scan = newItem(' ');
+  assert.equal(await processItem(scan.id, deps({ ai })), 'awaiting_vendor');
+  assert.ok(ai.requests.find((r) => r.system === EXTRACT_SYSTEM)!.pdf, 'scan: PDF sent');
+  const text = fakeAi({ pdfOnlyForScans: true });
+  const t = newItem(invoiceText());
+  await processItem(t.id, deps({ ai: text }));
+  const req = text.requests.find((r) => r.system === EXTRACT_SYSTEM)!;
+  assert.equal(req.pdf, undefined, 'text PDF: text only');
 });
 
 test('unreadable PDF → needs_attention/unreadable_pdf', async () => {

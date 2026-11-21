@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db.js';
-import { ImageError, isJpeg, jpegToPdf } from '../core/imagePdf.js';
+import { ImageError, imageToPdf, isJpeg, isPng } from '../core/imagePdf.js';
 import { UPLOAD_PREFIX, createEmail, createItem, getItem } from '../core/items.js';
 import type { Item } from '../core/items.js';
 import { processItem } from '../core/pipeline.js';
@@ -20,13 +20,13 @@ export class UploadError extends Error {
   }
 }
 
-/** A PDF as it is; a JPEG photo wrapped in a one-page PDF. Anything else is refused. */
+/** A PDF as it is; a JPEG or PNG image wrapped in a one-page PDF. Anything else is refused. */
 export function toPdf(data: Buffer): Buffer {
   if (data.length === 0) throw new UploadError('empty_file');
   if (data.length > MAX_UPLOAD_BYTES) throw new UploadError('too_large');
   if (isPdf(data)) return data;
-  if (isJpeg(data)) {
-    try { return jpegToPdf(data); } catch (e) {
+  if (isJpeg(data) || isPng(data)) {
+    try { return imageToPdf(data); } catch (e) {
       if (e instanceof ImageError) throw new UploadError('unsupported_file', e.message);
       throw e;
     }

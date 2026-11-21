@@ -14,6 +14,7 @@ import { createHub } from './server/relay/hub.js';
 import { startRelayClient } from './server/sources/relayClient.js';
 import { startTelegramBot } from './server/sources/telegram.js';
 import { startWorker } from './server/worker.js';
+import { startInboxSweeper } from './server/ai/inbox.js';
 
 const problems = envProblems(process.env);
 if (problems.length) throw new Error(`refusing to start: ${problems.join('; ')}`);
@@ -36,6 +37,8 @@ const getContext = () => {
   };
 };
 const worker = startWorker(getContext);
+// Leftovers in the SSH agent's shared folder (AI_INBOX_DIR), if a crash skipped the per-request cleanup.
+startInboxSweeper();
 // Receipts sent to the Telegram bot; idle until a bot token is saved in Settings.
 const botDeps = () => { try { return getContext().deps; } catch { return null; } };
 startTelegramBot(botDeps);

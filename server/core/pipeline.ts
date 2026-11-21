@@ -159,7 +159,7 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   if (!fields) {
     if (!ai) return moveTo(item.id, 'needs_attention', 'no_recipe_no_ai');
     try {
-      fields = await aiExtract(ai, { text: doc.text, pdf, sender, categories: settings.categories.map((c) => c.name) });
+      fields = await aiExtract(ai, { text: doc.text, pdf, isScan: doc.isScan, sender, categories: settings.categories.map((c) => c.name) });
     } catch (e) {
       if (isDbError(e)) throw e;
       if (e instanceof AiUnavailableError) return waitForAi(item, deps, e.message);
