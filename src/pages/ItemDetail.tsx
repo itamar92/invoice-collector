@@ -50,6 +50,7 @@ export default function ItemDetail() {
   const [vatOk, setVatOk] = useState(false);
   const [problems, setProblems] = useState<Reason[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const [reparseNote, setReparseNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   const act = useAction();
   // Arriving straight from an upload: say what happened to the file.
   const uploaded = (useLocation().state as { uploaded?: 'new' | 'duplicate' } | null)?.uploaded;
@@ -91,6 +92,19 @@ export default function ItemDetail() {
       await leave(t('item.sentNamed', { name: itemTitle(item) }));
     } else await leave(t('item.savedNamed', { name: itemTitle(item) }));
   }, andSend ? 'send' : 'save');
+  const reparse = () => {
+    if (dirty || item.provenance === 'manual') { if (!window.confirm(t('item.reparseConfirm'))) return; }
+    void act.run(async () => {
+      setMsg(null); setProblems([]);
+      const r = await api.reparse(item.id);
+      await load.reload(); await refreshSummary();
+      if (r.outcome === 'invalid') {
+        setReparseNote({ tone: 'warn', text: `${t('item.reparse.invalid')} ${r.problems.map(reasonLabel).join(', ')}` });
+        return;
+      }
+      setReparseNote({ tone: r.outcome === 'updated' || r.outcome === 'same' ? 'ok' : 'warn', text: t(`item.reparse.${r.outcome}` as MessageKey) });
+    }, 'reparse');
+  };
   const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); }, 'retry');
   // Set aside as the receipt of a tax invoice already on file (only the invoice counts as the expense).
   const invoiceOf = item.state === 'ignored'
@@ -173,6 +187,7 @@ export default function ItemDetail() {
             )}
           </div>
 
+          {reparseNote && <div className="mt-3"><Notice tone={reparseNote.tone}>{reparseNote.text}</Notice></div>}
           {patch === null && <ErrorText>{t('error.invalid_request')}</ErrorText>}
           {problems.length > 0 && (
             <div className="mt-3 rounded-xl bg-warn-tint p-3 text-sm">
@@ -184,6 +199,7 @@ export default function ItemDetail() {
           <div className="mt-4 flex flex-wrap gap-2">
             {editable && <Button loading={act.is('save')} disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
             {editable && item.emailMode !== 'backfill' && <Button variant="secondary" loading={act.is('send')} disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
+            {editable && !item.storagePath && item.hasText && <Button variant="ghost" loading={act.is('reparse')} disabled={act.busy} onClick={reparse}>{t('item.reparse')}</Button>}
             {item.state === 'needs_attention' && <Button variant="secondary" loading={act.is('retry')} disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
             {!TERMINAL.includes(item.state) && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
           </div>

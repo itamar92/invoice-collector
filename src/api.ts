@@ -24,6 +24,7 @@ export interface Item {
 /** Calls and tokens over some AI calls; `unknownCalls` reported no token counts (SSH agent). */
 export interface AiUsageTotals { calls: number; inputTokens: number; outputTokens: number; unknownCalls: number }
 export interface AiUsageSummary { today: AiUsageTotals; month: AiUsageTotals; total: AiUsageTotals; backfill: AiUsageTotals }
+export type ReparseOutcome = 'updated' | 'same' | 'invalid' | 'no_recipe' | 'ai_always' | 'no_match' | 'not_editable' | 'busy';
 /** After a recipe change: the vendor's unfiled documents read again with it. */
 export interface Reapplied { checked: number; updated: number }
 export interface ItemEvent { at: string; from: string | null; to: string; note: string | null }
@@ -145,6 +146,8 @@ export const api = {
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
   /** A receipt set aside because its tax invoice is on file: file it anyway. */
   keepReceipt: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/keep-receipt`),
+  /** Reads the document again with its vendor's current recipe (no AI). */
+  reparse: (id: string) => send<{ outcome: ReparseOutcome; problems: Reason[]; item: Item }>('POST', `/api/items/${enc(id)}/reparse`),
   ingestFailures: () => get<IngestFailure[]>('/api/ingest-failures'),
   /** A photographed receipt (JPEG) or a PDF. Answers once it was read; `duplicate` points at the existing item. */
   upload: (file: Blob, name: string) =>
