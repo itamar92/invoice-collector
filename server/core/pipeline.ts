@@ -13,7 +13,7 @@ import { matchesRecipe, runRecipe, type Recipe } from './recipe.js';
 import { findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
 import { TransientError } from './types.js';
 import type { Deps, ExtractedFields, ItemState, Provenance, Reason } from './types.js';
-import { validateFields } from './validate.js';
+import { validateFields, type Problem } from './validate.js';
 
 /** Storage/accounting transient failures allowed before the item goes to needs_attention. */
 const MAX_ATTEMPTS = 5;
@@ -96,8 +96,6 @@ const UNSETTLED: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_
 export function reapplyVendorRecipe(vendorKey: string, settings: Settings, now: Date): { checked: number; updated: number } {
   const recipe = getActiveRecipe(vendorKey);
   if (!recipe || recipe.aiAlways) return { checked: 0, updated: 0 };
-  const today = localDate({ settings, now: () => now } as Deps);
-  const names = new Set(settings.categories.map((c) => c.name));
   const ids = getDb().prepare(
     `SELECT id FROM items WHERE vendor_key = ? AND state IN (${UNSETTLED.map(() => '?').join(',')})
        AND storage_path IS NULL AND text IS NOT NULL AND COALESCE(provenance, '') != 'manual'
@@ -107,34 +105,68 @@ export function reapplyVendorRecipe(vendorKey: string, settings: Settings, now: 
   let checked = 0;
   let updated = 0;
   for (const id of ids) {
-    if (inFlight.has(id)) continue;
-    const item = getItem(id);
-    if (!item?.text || !UNSETTLED.includes(item.state)) continue;
-    const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
-    if (!matchesRecipe(recipe, sender, item.text)) continue;
-    checked++;
-    const read = runRecipe(recipe, item.text);
-    const vendor = getVendor(vendorKey);
-    const category = read.category && names.has(read.category) ? read.category
-      : item.fields?.category && names.has(item.fields.category) ? item.fields.category
-        : vendor?.defaultCategory && names.has(vendor.defaultCategory) ? vendor.defaultCategory : null;
-    const fields: ExtractedFields = { ...read, category };
-    if (!validateFields(fields, settings, today).ok) continue;
-    const { vatConfirmed: _v, ...before } = item.fields ?? ({} as ExtractedFields);
-    void _v;
-    if (JSON.stringify(before) === JSON.stringify(fields)) continue;
-    setItemFields(id, fields, 'recipe');
-    updated++;
-    if (currentState(id) === 'dismissed') continue; // the new doc number is one already on file
-    noteItem(id, 'recipe_reapplied');
-    if (settleReceiptPair(id, vendorKey, fields, item.text)) continue;
-    if (item.state !== 'needs_attention' || !category) continue;
-    const email = getEmail(item.messageId);
-    if (vendor?.status === 'ignored') moveTo(id, 'ignored', undefined, 'vendor_ignored');
-    else if (!vendor || vendor.status === 'unreviewed') moveTo(id, 'awaiting_vendor', 'new_vendor', 'recipe_reapplied');
-    else moveTo(id, email?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready', undefined, 'recipe_reapplied');
+    const r = readAgainWith(id, recipe, settings, now);
+    if (r.outcome === 'updated' || r.outcome === 'same' || r.outcome === 'invalid') checked++;
+    if (r.outcome === 'updated') updated++;
   }
   return { checked, updated };
+}
+
+export type ReparseOutcome = 'updated' | 'same' | 'invalid' | 'no_recipe' | 'ai_always' | 'no_match' | 'not_editable' | 'busy';
+
+/**
+ * The owner asks to read one not-yet-filed document again with its vendor's current recipe (or, for a document
+ * with no vendor yet, the recipe that matches it). Like reapplyVendorRecipe, but it also overrides fields the
+ * owner typed by hand: pressing the button says the recipe's reading is wanted. Recipe only, no AI.
+ */
+export function reparseItem(id: string, settings: Settings, now: Date): { outcome: ReparseOutcome; problems: Problem[] } {
+  const item = getItem(id);
+  if (!item) throw new Error(`Unknown item: ${id}`);
+  if (!UNSETTLED.includes(item.state) || item.storagePath || !item.text) return { outcome: 'not_editable', problems: [] };
+  let recipe: Recipe | null = item.vendorKey ? getActiveRecipe(item.vendorKey) : null;
+  if (!recipe && !item.vendorKey) {
+    const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
+    recipe = findRecipe(sender, item.text);
+  }
+  if (!recipe) return { outcome: 'no_recipe', problems: [] };
+  if (recipe.aiAlways) return { outcome: 'ai_always', problems: [] };
+  return readAgainWith(id, recipe, settings, now);
+}
+
+/** Reads one unsettled document with `recipe`; new valid fields replace the old ones and the item moves on. */
+function readAgainWith(id: string, recipe: Recipe, settings: Settings, now: Date): { outcome: ReparseOutcome; problems: Problem[] } {
+  if (inFlight.has(id)) return { outcome: 'busy', problems: [] };
+  const item = getItem(id);
+  if (!item?.text || !UNSETTLED.includes(item.state)) return { outcome: 'not_editable', problems: [] };
+  const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
+  if (!matchesRecipe(recipe, sender, item.text)) return { outcome: 'no_match', problems: [] };
+  const vendorKey = recipe.vendorKey;
+  const today = localDate({ settings, now: () => now } as Deps);
+  const names = new Set(settings.categories.map((c) => c.name));
+  const read = runRecipe(recipe, item.text);
+  const vendor = getVendor(vendorKey);
+  const category = read.category && names.has(read.category) ? read.category
+    : item.fields?.category && names.has(item.fields.category) ? item.fields.category
+      : vendor?.defaultCategory && names.has(vendor.defaultCategory) ? vendor.defaultCategory : null;
+  const fields: ExtractedFields = { ...read, category };
+  const check = validateFields(fields, settings, today);
+  if (!check.ok) return { outcome: 'invalid', problems: check.problems };
+  const { vatConfirmed: _v, ...before } = item.fields ?? ({} as ExtractedFields);
+  void _v;
+  if (JSON.stringify(before) === JSON.stringify(fields) && item.vendorKey === vendorKey) {
+    return { outcome: 'same', problems: [] };
+  }
+  if (!item.vendorKey) setItemVendor(id, vendorKey);
+  setItemFields(id, fields, 'recipe');
+  if (currentState(id) === 'dismissed') return { outcome: 'updated', problems: [] }; // the new doc number is one already on file
+  noteItem(id, 'recipe_reapplied');
+  if (settleReceiptPair(id, vendorKey, fields, item.text)) return { outcome: 'updated', problems: [] };
+  if (item.state !== 'needs_attention' || !category) return { outcome: 'updated', problems: [] };
+  const email = getEmail(item.messageId);
+  if (vendor?.status === 'ignored') moveTo(id, 'ignored', undefined, 'vendor_ignored');
+  else if (!vendor || vendor.status === 'unreviewed') moveTo(id, 'awaiting_vendor', 'new_vendor', 'recipe_reapplied');
+  else moveTo(id, email?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready', undefined, 'recipe_reapplied');
+  return { outcome: 'updated', problems: [] };
 }
 
 /**

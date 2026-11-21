@@ -18,7 +18,7 @@ import { AiOutputError, AiUnavailableError, type AiProvider, type AiRequest } fr
 import { EXTRACT_SYSTEM, RECIPE_SYSTEM } from '../server/ai/prompts.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 import { updateSettings } from '../server/settings.js';
-import { processItem, reapplyVendorRecipe, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
+import { processItem, reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
 import { itemUsage, usageSummary } from '../server/ai/usage.js';
 
 // ---------- synthetic documents ----------
@@ -959,6 +959,25 @@ test('reapplyVendorRecipe: a recipe that still reads wrong keeps the previous fi
   assert.deepEqual(reapplyVendorRecipe('acme', SETTINGS, NOW), { checked: 1, updated: 0 });
   assert.equal(getItem(a.id)!.fields?.total, 117);
   assert.equal(getItem(a.id)!.state, 'awaiting_backfill_approval');
+});
+
+test('reparseItem: one document re-read with the current recipe, even after a hand edit', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+    fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.]+)', parse: 'amount' } },
+  });
+  const a = newItem(invoiceText({ num: '1001' }), { mode: 'backfill' });
+  assert.equal(await processItem(a.id, deps()), 'needs_attention');
+  getDb().prepare(`UPDATE items SET provenance = 'manual' WHERE id = ?`).run(a.id);
+  // The old recipe still reads it wrong.
+  assert.equal(reparseItem(a.id, SETTINGS, NOW).outcome, 'invalid');
+
+  saveRecipe(layoutRecipe('acme', 'billing@acme.example'), 'user');
+  assert.equal(reparseItem(a.id, SETTINGS, NOW).outcome, 'updated');
+  const after = getItem(a.id)!;
+  assert.equal(after.fields?.total, 117);
+  assert.equal(after.provenance, 'recipe');
+  assert.equal(after.state, 'awaiting_backfill_approval');
+  assert.equal(reparseItem(a.id, SETTINGS, NOW).outcome, 'same');
 });
 
 // ---------- AI token usage ----------

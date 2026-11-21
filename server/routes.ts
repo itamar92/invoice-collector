@@ -13,7 +13,7 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
-import { reapplyVendorRecipe, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
+import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { compileRecipe, RecipeError } from './core/recipe.js';
 import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
@@ -302,6 +302,16 @@ export function apiRouter(ctx: ApiContext): express.Router {
       transition(item.id, to, undefined, 'manual_retry');
     })(); // the worker picks it up on its next tick
     res.json(getItem(item.id));
+  }));
+
+  // The owner asks to read one unfiled document again with its vendor's current recipe (no AI).
+  r.post('/items/:id/reparse', wrap((req, res) => {
+    const item = getItem(param(req, 'id'));
+    if (!item) throw notFound('item');
+    if (!EDITABLE.includes(item.state) || item.storagePath) throw new HttpError(409, 'item_not_editable');
+    if (!item.text?.trim()) throw new HttpError(409, 'item_no_text');
+    const r = reparseItem(item.id, getSettings(), clock());
+    res.json({ outcome: r.outcome, problems: r.problems, item: getItem(item.id) });
   }));
 
   // A receipt set aside because its tax invoice is on file (pipeline settleReceiptPair): the owner files it anyway.
