@@ -157,7 +157,10 @@ test('recipe regenerate: drafts from a vendor document with the owner\'s notes, 
     },
   };
   const { call } = await boot({
-    getAi: () => ({ name: 'fake', supportsPdf: false, ping: async () => {}, completeJson: async (r) => { prompts.push(r.user); return reply; } }),
+    getAi: () => ({
+      name: 'fake', supportsPdf: false, ping: async () => {},
+      completeJson: async (r) => { prompts.push(r.user); r.onUsage?.({ inputTokens: 1500, outputTokens: 300 }); return reply; },
+    }),
   });
   const before = (await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length;
   const res = await call('POST', '/api/vendors/demo-cell/recipe/regenerate', { itemId: id, comment: 'the total is wrong' });
@@ -169,6 +172,9 @@ test('recipe regenerate: drafts from a vendor document with the owner\'s notes, 
   assert.equal(body.recipe.aiAlways, undefined); // the vendor's choice, not the AI's
   assert.match(prompts[0]!, /<owner_feedback>\nthe total is wrong\n<\/owner_feedback>/);
   assert.match(prompts[0]!, /<previous_recipe>/);
+  assert.deepEqual(body.usage, { calls: 1, inputTokens: 1500, outputTokens: 300, unknownCalls: 0 });
+  assert.equal((await (await call('GET', `/api/items/${id}`)).json()).aiUsage.inputTokens, 1500);
+  assert.equal((await (await call('GET', '/api/ai/usage')).json()).total.calls, 1);
   assert.equal((await (await call('GET', '/api/vendors/demo-cell/recipes')).json()).length, before); // nothing saved
 
   // Another vendor's document, unknown vendor, no AI.
@@ -742,4 +748,44 @@ test('PUT /api/settings storageProvider: one cloud at a time, switching deletes 
   await call('PUT', '/api/settings', { storageProvider: 'dropbox' });
   assert.equal(getSecret('gdrive_refresh'), null);
   assert.equal(getSettings().storageProvider, 'dropbox');
+});
+
+test('saving a recipe re-reads the vendor\'s waiting documents with it', async () => {
+  upsertVendor('demo-cell', 'סלולר דמו');
+  setVendorStatus('demo-cell', 'business');
+  updateSettings({ categories: [{ name: 'תקשורת', sendToAccounting: true }] });
+  const id = item('needs_attention', { total: null, category: 'תקשורת' }, 'reapply');
+  setItemVendor(id, 'demo-cell');
+  setItemText(id, 'סלולר דמו\nתאריך: 01/06/2026\nסה"כ: 118.00');
+  const { call } = await boot();
+  const res = await call('PUT', '/api/vendors/demo-cell/recipe', recipeJson({
+    fields: {
+      vendorName: { kind: 'const', value: 'סלולר דמו' },
+      docType: { kind: 'const', value: 'tax_invoice' },
+      docNumber: { kind: 'const', value: '77' },
+      currency: { kind: 'const', value: 'ILS' },
+      total: { kind: 'regex', pattern: 'סה"כ:\\s*([\\d.]+)', parse: 'amount' },
+      issueDate: { kind: 'regex', pattern: 'תאריך:\\s*(\\d{2}/\\d{2}/\\d{4})', parse: 'date', dateFormat: 'DD/MM/YYYY' },
+    },
+    match: { textMarkers: ['סלולר דמו'] },
+  }));
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).reapplied, { checked: 1, updated: 1 });
+  const after = getItem(id)!;
+  assert.equal(after.fields?.total, 118);
+  assert.equal(after.fields?.category, 'תקשורת');
+  assert.equal(after.state, 'ready');
+});
+
+test('keep-receipt files a receipt that was set aside for its invoice; other items -> 409', async () => {
+  const key = businessVendor();
+  const id = item('needs_attention', { docType: 'receipt' }, 'keep');
+  setItemVendor(id, key);
+  transition(id, 'ignored', undefined, 'receipt_of_invoice:inv-1');
+  const other = item('needs_attention', null, 'other');
+  const { call } = await boot();
+  const res = await call('POST', `/api/items/${id}/keep-receipt`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).state, 'ready');
+  assert.equal((await call('POST', `/api/items/${other}/keep-receipt`)).status, 409);
 });

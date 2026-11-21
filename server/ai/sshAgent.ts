@@ -151,6 +151,7 @@ export class SshAgentProvider implements AiProvider {
       ))
       : await this.run(SSH_COMMAND, prompt);
     if (r.code !== 0) throw new AiUnavailableError(`ssh agent exited ${r.code}: ${r.stderr.trim().slice(0, 200)}`);
+    req.onUsage?.(null); // the agent's CLI does not report tokens; the call is still counted
     const reply = parseJsonReply(r.stdout);
     const unreadable = (reply as Record<string, unknown> | null)?.[UNREADABLE_KEY];
     if (req.pdf && this.inbox && unreadable !== undefined) {

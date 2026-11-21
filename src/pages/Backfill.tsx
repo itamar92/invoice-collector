@@ -5,7 +5,7 @@ import type { BackfillRow } from '../api.js';
 import { VendorDecisions } from './Attention.js';
 import {
   Button, Empty, ErrorText, Flag, fmtDate, fmtDateTime, fmtMoney, Loading, Notice, PageTitle, rowCls, StateBadge,
-  useAction, useApp, useLoad,
+  usageText, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 
@@ -85,6 +85,11 @@ export default function Backfill() {
           emails: status.result.emails, items: status.result.items,
           failed: status.result.failed ? t('start.failed', { n: status.result.failed }) : '',
         })}</Notice>
+      )}
+
+      {status && status.receiptsSetAside > 0 && <Notice>{t('backfill.receiptsSetAside', { n: status.receiptsSetAside })}</Notice>}
+      {status && status.aiUsage.calls > 0 && (
+        <p className="text-sm"><span className="font-semibold">{t('backfill.aiUsage')}: </span><span className="num text-muted">{usageText(status.aiUsage)}</span></p>
       )}
 
       {!done && !notConnected && rows.length > 0 && (

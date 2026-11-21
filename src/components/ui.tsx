@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, onRequestsInFlight } from '../api.js';
-import type { Item, ItemState, SettingsResponse, Summary } from '../api.js';
+import type { AiUsageTotals, Item, ItemState, SettingsResponse, Summary } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 
 // ---------- app-wide state ----------
@@ -80,6 +80,15 @@ export function fmtMoney(n: number | null | undefined, currency: string | null |
   } catch {
     return `${n} ${currency ?? ''}`.trim();
   }
+}
+const numFmt = new Intl.NumberFormat('he-IL');
+/** "12 calls · 34,567 tokens (30,000 in, 4,567 out)" for some AI calls. */
+export function usageText(u: AiUsageTotals | null | undefined): string {
+  if (!u || u.calls === 0) return t('usage.none');
+  return t('usage.line', {
+    calls: numFmt.format(u.calls), total: numFmt.format(u.inputTokens + u.outputTokens),
+    input: numFmt.format(u.inputTokens), output: numFmt.format(u.outputTokens),
+  }) + (u.unknownCalls ? t('usage.unknown', { n: numFmt.format(u.unknownCalls) }) : '');
 }
 export const stateLabel = (s: string) => tDyn(`state.${s}`, 'common.none');
 export const reasonLabel = (r: string | null) => (r ? tDyn(`reason.${r}`, 'error.generic') : '');

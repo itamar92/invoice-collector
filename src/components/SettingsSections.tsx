@@ -6,7 +6,7 @@ import { FolderPicker } from './FolderPicker.js';
 import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings, StorageProvider } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
-import { Button, Check, ErrorText, Spinner, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp, useLoad } from './ui.js';
+import { Button, Check, ErrorText, Spinner, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, usageText, useAction, useApp, useLoad } from './ui.js';
 
 /** Shared by Setup (one step each) and Settings (all of them, editable later). */
 
@@ -235,6 +235,29 @@ export function AiSection() {
       </div>
       {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.text}</Notice>}
       <ErrorText>{saving.error ?? test.error}</ErrorText>
+      <AiUsage />
+    </div>
+  );
+}
+
+/** Tokens the AI used, as its provider reported them: a cost check for owners who pay per API call. */
+function AiUsage() {
+  const usage = useLoad(() => api.aiUsage());
+  const u = usage.data;
+  if (!u || u.total.calls === 0) return null;
+  const rows: [MessageKey, typeof u.today][] = [
+    ['ai.usageToday', u.today], ['ai.usageMonth', u.month], ['ai.usageTotal', u.total],
+    ...(u.backfill.calls > 0 ? [['ai.usageBackfill', u.backfill] as [MessageKey, typeof u.today]] : []),
+  ];
+  return (
+    <div className="rounded-xl bg-ground p-3">
+      <h3 className="text-[13px] font-semibold">{t('ai.usageTitle')}</h3>
+      <dl className="mt-1 space-y-0.5 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex flex-wrap gap-x-2"><dt className="font-semibold">{t(k)}:</dt><dd className="num text-muted">{usageText(v)}</dd></div>
+        ))}
+      </dl>
+      <p className={`mt-1 ${hintCls}`}>{t('ai.usageHint')}</p>
     </div>
   );
 }
