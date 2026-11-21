@@ -25,6 +25,8 @@ export interface ExtractedFields {
   allocationNumber: string | null;
   description: string | null;
   category: string | null;
+  /** The owner looked at a VAT that does not add up (e.g. a mixed-rate or partly exempt bill) and accepted it. */
+  vatConfirmed?: boolean;
 }
 
 export type Provenance = 'recipe' | 'ai' | 'manual';
@@ -48,8 +50,14 @@ export interface StorageDestination {
   exists(folder: string, filename: string, pdf: Buffer): Promise<{ exists: boolean; sameContent: boolean }>;
   /** The folders directly inside `path` ('' = the top), for picking where to file. Read-only. */
   listFolders?(path: string): Promise<FolderEntry[]>;
+  /** Creates `name` inside `parent` ('' = the top); an existing folder of that name is returned as it is. */
+  createFolder?(parent: string, name: string): Promise<FolderEntry>;
 }
 export interface FolderEntry { name: string; path: string }
+/** createFolder: a file (not a folder) already has that name. */
+export class FolderConflictError extends Error {
+  constructor(path: string) { super(`a file already exists at: ${path}`); this.name = 'FolderConflictError'; }
+}
 /** listFolders: the folder asked for does not exist. */
 export class FolderNotFoundError extends Error {
   constructor(path: string) { super(`folder not found: ${path}`); this.name = 'FolderNotFoundError'; }

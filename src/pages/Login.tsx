@@ -30,7 +30,7 @@ export default function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
           <input type="password" autoFocus autoComplete="current-password" className={inputCls}
             value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
-        <Button type="submit" className="w-full" disabled={busy || !password}>{t('login.submit')}</Button>
+        <Button type="submit" className="w-full" loading={busy} disabled={!password}>{t('login.submit')}</Button>
         <ErrorText>{error}</ErrorText>
       </form>
     </div>

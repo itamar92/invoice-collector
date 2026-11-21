@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import type { ExtractedFields, ItemState, Reason } from '../api.js';
 import {
-  Button, Card, ErrorText, Field, fmtDateTime, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
+  AiThinking, Button, Card, ErrorText, Field, fmtDateTime, hintCls, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
   setFlash, StateBadge, stateLabel, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
@@ -13,12 +13,13 @@ const EDITABLE: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_b
 const TERMINAL: ItemState[] = ['done', 'ignored', 'dismissed'];
 const DOC_TYPES = ['tax_invoice', 'receipt', 'tax_invoice_receipt', 'credit_note', 'other'] as const;
 
-type Draft = Record<keyof ExtractedFields, string>;
-const KEYS: (keyof ExtractedFields)[] = [
+type FieldKey = Exclude<keyof ExtractedFields, 'vatConfirmed'>;
+type Draft = Record<FieldKey, string>;
+const KEYS: FieldKey[] = [
   'vendorName', 'vendorTaxId', 'docType', 'docNumber', 'issueDate', 'total', 'vat', 'net', 'currency',
   'allocationNumber', 'description', 'category',
 ];
-const NUMERIC = new Set<keyof ExtractedFields>(['total', 'vat', 'net']);
+const NUMERIC = new Set<FieldKey>(['total', 'vat', 'net']);
 
 const toDraft = (f: ExtractedFields | null): Draft =>
   Object.fromEntries(KEYS.map((k) => [k, f?.[k] == null ? '' : String(f[k])])) as Draft;
@@ -46,21 +47,26 @@ export default function ItemDetail() {
   const load = useLoad(() => api.item(id), [id]);
   const item = load.data;
   const [draft, setDraft] = useState<Draft>(toDraft(null));
+  const [vatOk, setVatOk] = useState(false);
   const [problems, setProblems] = useState<Reason[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const act = useAction();
   // Arriving straight from an upload: say what happened to the file.
   const uploaded = (useLocation().state as { uploaded?: 'new' | 'duplicate' } | null)?.uploaded;
 
-  useEffect(() => { if (item) setDraft(toDraft(item.fields)); }, [item]);
+  useEffect(() => { if (item) { setDraft(toDraft(item.fields)); setVatOk(!!item.fields?.vatConfirmed); } }, [item]);
 
-  if (load.loading && !item) return <Loading />;
+  if (load.loading && !item) return <Loading rows={4} />;
   if (!item) return <ErrorText>{load.error}</ErrorText>;
 
   const orig = toDraft(item.fields);
   const editable = EDITABLE.includes(item.state);
-  const patch = diff(draft, orig);
+  const fieldPatch = diff(draft, orig);
+  // The VAT approval travels with the fields; it only matters while the VAT does not add up.
+  const patch = fieldPatch === null ? null
+    : vatOk !== !!item.fields?.vatConfirmed ? { ...fieldPatch, vatConfirmed: vatOk } : fieldPatch;
   const dirty = patch !== null && Object.keys(patch).length > 0;
+  const vatQuestion = vatOk || item.reason === 'vat_mismatch' || problems.includes('vat_mismatch');
   const categories = settings!.settings.categories.map((c) => c.name);
 
   const refresh = async (note: string | null) => { await load.reload(); await refreshSummary(); setMsg(note); };
@@ -84,14 +90,22 @@ export default function ItemDetail() {
       try { await api.runWorker(); } catch { /* the worker picks it up on its next tick anyway */ }
       await leave(t('item.sentNamed', { name: itemTitle(item) }));
     } else await leave(t('item.savedNamed', { name: itemTitle(item) }));
-  });
-  const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); });
+  }, andSend ? 'send' : 'save');
+  const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); }, 'retry');
   const dismiss = () => {
     if (!window.confirm(t('item.dismissConfirm'))) return;
-    void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); });
+    void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); }, 'dismiss');
+  };
+  /** Saves the owner's corrections (if any) so the recipe writer reads them as the right answer; returns the vendor. */
+  const saveForRecipe = async (): Promise<string | null> => {
+    if (!dirty) return item.vendorKey;
+    const r = await api.saveFields(item.id, patch!);
+    setProblems(r.problems);
+    await load.reload(); await refreshSummary();
+    return r.item.vendorKey;
   };
 
-  const input = (k: keyof ExtractedFields, extra: { type?: string; ltr?: boolean } = {}) => (
+  const input = (k: FieldKey, extra: { type?: string; ltr?: boolean } = {}) => (
     <input type={extra.type ?? 'text'} inputMode={NUMERIC.has(k) ? 'decimal' : undefined} disabled={!editable}
       className={`${inputCls} ${extra.ltr ? 'ltr' : ''}`} value={draft[k]} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />
   );
@@ -136,6 +150,12 @@ export default function ItemDetail() {
             <Field className="col-span-3" label={t('field.vendorTaxId')}>{input('vendorTaxId', { ltr: true })}</Field>
             <Field className="col-span-3" label={t('field.allocationNumber')}>{input('allocationNumber', { ltr: true })}</Field>
             <Field className="col-span-6" label={t('field.description')}>{input('description')}</Field>
+            {vatQuestion && (
+              <label className="col-span-6 flex items-start gap-2 rounded-xl bg-warn-tint p-3 text-sm">
+                <input type="checkbox" className="mt-0.5 size-5" disabled={!editable} checked={vatOk} onChange={(e) => setVatOk(e.target.checked)} />
+                <span><span className="font-semibold">{t('item.vatConfirm')}</span><span className="block text-xs text-muted">{t('item.vatConfirmHint')}</span></span>
+              </label>
+            )}
           </div>
 
           {patch === null && <ErrorText>{t('error.invalid_request')}</ErrorText>}
@@ -147,12 +167,16 @@ export default function ItemDetail() {
           )}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {editable && <Button disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
-            {editable && item.emailMode !== 'backfill' && <Button variant="secondary" disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
-            {item.state === 'needs_attention' && <Button variant="secondary" disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
-            {!TERMINAL.includes(item.state) && <Button variant="danger" className="ms-auto" disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
+            {editable && <Button loading={act.is('save')} disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
+            {editable && item.emailMode !== 'backfill' && <Button variant="secondary" loading={act.is('send')} disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
+            {item.state === 'needs_attention' && <Button variant="secondary" loading={act.is('retry')} disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
+            {!TERMINAL.includes(item.state) && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
           </div>
           <ErrorText>{act.error}</ErrorText>
+
+          {item.hasText && (editable || item.vendorKey) && (
+            <RecipeFromFix canSave={patch !== null} dirty={dirty} disabled={act.busy} saveFirst={saveForRecipe} />
+          )}
 
           <dl className="mt-4 space-y-1 text-xs text-muted">
             {item.attachmentName && <div><dt className="inline font-semibold">{t('item.attachment')}: </dt><dd className="inline"><bdi>{item.attachmentName}</bdi></dd></div>}
@@ -180,6 +204,86 @@ export default function ItemDetail() {
           ))}
         </ol>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * The recipe read this document wrong: the owner corrects the fields above, then asks the AI for a new recipe that
+ * reads them that way. The corrections are saved first (they are what the recipe must reproduce); the new recipe
+ * is saved only when the owner presses save.
+ */
+function RecipeFromFix({ canSave, dirty, disabled, saveFirst }: {
+  canSave: boolean; dirty: boolean; disabled: boolean; saveFirst: () => Promise<string | null>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [comment, setComment] = useState('');
+  const [draft, setDraft] = useState<{ vendorKey: string; recipe: Record<string, unknown>; reproduces: boolean } | null>(null);
+  const [savedRecipe, setSavedRecipe] = useState(false);
+  const act = useAction();
+  const { id = '' } = useParams();
+
+  const build = () => act.run(async () => {
+    setDraft(null); setSavedRecipe(false);
+    const vendorKey = await saveFirst();
+    if (!vendorKey) throw new Error(t('item.recipeFix.noVendor'));
+    const r = await api.regenerateRecipe(vendorKey, id, comment.trim());
+    setDraft({ vendorKey, ...r });
+  }, 'build');
+  const keep = () => act.run(async () => {
+    if (!draft) return;
+    await api.saveRecipe(draft.vendorKey, draft.recipe);
+    setSavedRecipe(true);
+  }, 'keep');
+
+  if (!open) {
+    return (
+      <div className="mt-4 rounded-xl border border-dashed border-line-strong p-3">
+        <div className="text-sm font-semibold">{t('item.recipeFix.title')}</div>
+        <p className={`mt-0.5 ${hintCls}`}>{t('item.recipeFix.teaser')}</p>
+        <Button variant="ghost" className="mt-1 -ms-2" onClick={() => setOpen(true)}>{t('item.recipeFix.open')}</Button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 space-y-2 rounded-xl border border-line bg-ground p-3">
+      <div className="text-sm font-semibold">{t('item.recipeFix.title')}</div>
+      <ol className="list-decimal space-y-0.5 ps-5 text-xs text-muted">
+        <li>{t('item.recipeFix.step1')}</li>
+        <li>{t('item.recipeFix.step2')}</li>
+        <li>{t('item.recipeFix.step3')}</li>
+      </ol>
+      {dirty && <Notice tone="info">{t('item.recipeFix.willSave')}</Notice>}
+      <label className="block text-xs">
+        <span className="mb-0.5 block font-semibold text-muted">{t('vendors.regen.comment')}</span>
+        <textarea className={`${inputCls} h-20 py-2`} value={comment} maxLength={2000} disabled={act.busy}
+          placeholder={t('vendors.regen.placeholder')} onChange={(e) => setComment(e.target.value)} />
+      </label>
+      {act.is('build')
+        ? <AiThinking title={t('item.recipeFix.thinking')} hint={t('item.recipeFix.thinkingHint')} />
+        : (
+          <Button variant="secondary" className="bg-white" disabled={disabled || act.busy || !canSave} onClick={build}>
+            {t('item.recipeFix.run')}
+          </Button>
+        )}
+      {draft && (
+        <div className="space-y-2">
+          <Notice tone={draft.reproduces ? 'ok' : 'warn'}>{draft.reproduces ? t('item.recipeFix.ok') : t('item.recipeFix.miss')}</Notice>
+          <details className="text-xs">
+            <summary className="cursor-pointer font-semibold text-accent">{t('item.recipeFix.show')}</summary>
+            <pre className="ltr mt-1 max-h-64 overflow-auto rounded-lg bg-white p-2 font-mono text-[11px]">{JSON.stringify(draft.recipe, null, 2)}</pre>
+          </details>
+          {savedRecipe
+            ? <Notice tone="ok">{t('item.recipeFix.saved')}</Notice>
+            : (
+              <div className="flex flex-wrap gap-2">
+                <Button loading={act.is('keep')} disabled={act.busy} onClick={keep}>{t('item.recipeFix.keep')}</Button>
+                <Button variant="ghost" disabled={act.busy} onClick={build}>{t('item.recipeFix.again')}</Button>
+              </div>
+            )}
+        </div>
+      )}
+      <ErrorText>{act.error}</ErrorText>
     </div>
   );
 }

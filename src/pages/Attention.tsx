@@ -27,7 +27,7 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
   const decide = (v: Vendor, status: VendorStatus) => act.run(async () => {
     await api.setVendor(v.key, { status });
     await load.reload(); await refreshSummary(); onDecided?.();
-  });
+  }, `${v.key}:${status}`);
 
   if (!load.data?.length) return load.error ? <ErrorText>{load.error}</ErrorText> : null;
   return (
@@ -54,7 +54,7 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
               {DECISIONS.map((s) => (
                 <Button key={s} variant={s === 'business' ? 'primary' : s === 'ignored' ? 'danger' : 'secondary'}
                   className={s === 'ignored' ? 'ms-auto sm:ms-3' : 'min-w-20 flex-1 sm:flex-none'}
-                  disabled={act.busy} title={t(`vendorStatus.${s}Hint`)} onClick={() => decide(v, s)}>
+                  loading={act.is(`${v.key}:${s}`)} disabled={act.busy} title={t(`vendorStatus.${s}Hint`)} onClick={() => decide(v, s)}>
                   {t(`vendorStatus.${s}`)}
                 </Button>
               ))}
@@ -116,7 +116,7 @@ export default function Attention() {
     <div className="space-y-4">
       <PageTitle>{t('attention.title')}</PageTitle>
       <VendorDecisions />
-      {data.loading && !d && <Loading />}
+      {data.loading && !d && <Loading rows={4} />}
       <ErrorText>{data.error}</ErrorText>
       {empty && (
         <div className="panel flex flex-col items-center gap-3 py-10 text-center">

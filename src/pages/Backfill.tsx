@@ -12,7 +12,8 @@ import { t } from '../i18n/he.js';
 /** First-run list (spec §4.5): approve → filed to Dropbox only. The UI offers no way to send these to Morning. */
 export default function Backfill() {
   const { settings, summary, setSettings, refreshSummary, refreshSettings } = useApp();
-  const list = useLoad(() => api.backfill());
+  const polling = useRef(false);
+  const list = useLoad(() => api.backfill(polling.current));
   const running = !!list.data?.running;
   const wasRunning = useRef(false);
 
@@ -20,8 +21,9 @@ export default function Backfill() {
   useEffect(() => {
     if (running) {
       wasRunning.current = true;
+      polling.current = true;
       const id = setInterval(() => { void list.reload(); }, 3000);
-      return () => clearInterval(id);
+      return () => { clearInterval(id); polling.current = false; };
     }
     if (wasRunning.current) {
       wasRunning.current = false;
@@ -41,9 +43,9 @@ export default function Backfill() {
 
   const toggle = (id: string) => { const n = new Set(picked); if (n.has(id)) n.delete(id); else n.add(id); setPicked(n); };
   const after = async () => { setPicked(new Set()); await list.reload(); await refreshSummary(); };
-  const restart = () => act.run(async () => { await api.startBackfill(); await list.reload(); });
-  const approve = () => act.run(async () => { await api.approveBackfill(chosen); await after(); });
-  const skip = () => act.run(async () => { await api.skipBackfill(chosen); await after(); });
+  const restart = () => act.run(async () => { await api.startBackfill(); await list.reload(); }, 'restart');
+  const approve = () => act.run(async () => { await api.approveBackfill(chosen); await after(); }, 'approve');
+  const skip = () => act.run(async () => { await api.skipBackfill(chosen); await after(); }, 'skip');
   const finish = () => {
     if (!window.confirm(t('backfill.finishConfirm'))) return;
     void act.run(async () => {
@@ -51,7 +53,7 @@ export default function Backfill() {
       setSettings(await api.settings());
       setFinished(true);
       await after();
-    });
+    }, 'finish');
   };
 
   const notConnected = list.code === 'not_connected';
@@ -60,7 +62,7 @@ export default function Backfill() {
 
   return (
     <div className="space-y-4">
-      <PageTitle actions={!done && <Button variant="secondary" disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}>
+      <PageTitle actions={!done && <Button variant="secondary" loading={act.is('finish')} disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}>
         {t('backfill.title')}
       </PageTitle>
       {finished && <Notice tone="ok">{t('backfill.finished')}</Notice>}
@@ -75,7 +77,7 @@ export default function Backfill() {
       {!running && status?.error && !done && (
         <div className="flex flex-wrap items-center justify-between gap-2 bg-warn-tint px-3 py-2 text-sm">
           <span>{status.error === 'interrupted' ? t('backfill.interrupted') : t('backfill.runError', { error: status.error })}</span>
-          <Button variant="secondary" disabled={act.busy} onClick={restart}>{t('backfill.restart')}</Button>
+          <Button variant="secondary" loading={act.is('restart')} disabled={act.busy} onClick={restart}>{t('backfill.restart')}</Button>
         </div>
       )}
       {!running && status?.result && !done && (
@@ -99,13 +101,13 @@ export default function Backfill() {
               <label className="flex min-h-10 items-center gap-2 text-sm font-semibold">
                 <input type="checkbox" className="size-5" checked={allPicked} onChange={pickAll} />{t('backfill.selectAll')}
               </label>
-              <Button className="ms-auto" disabled={!chosen.length || act.busy} onClick={approve}>{t('backfill.approve', { n: chosen.length })}</Button>
-              <Button variant="danger" className="ms-2" disabled={!chosen.length || act.busy} onClick={skip}>{t('backfill.skip', { n: chosen.length })}</Button>
+              <Button className="ms-auto" loading={act.is('approve')} disabled={!chosen.length || act.busy} onClick={approve}>{t('backfill.approve', { n: chosen.length })}</Button>
+              <Button variant="danger" className="ms-2" loading={act.is('skip')} disabled={!chosen.length || act.busy} onClick={skip}>{t('backfill.skip', { n: chosen.length })}</Button>
             </>
           )}
         </div>
         <ErrorText>{act.error}</ErrorText>
-        {list.loading && !list.data ? <Loading />
+        {list.loading && !list.data ? <Loading rows={6} />
           : notConnected ? <div className="mt-2"><Notice tone="warn">{t('backfill.notConnected')}</Notice></div>
           : list.error ? <ErrorText>{list.error}</ErrorText>
           : rows.length === 0 ? <Empty>{t('backfill.empty')}</Empty>

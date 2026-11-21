@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Item, RecipeVersion, Vendor, VendorStatus } from '../api.js';
 import {
-  Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
+  AiThinking, Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -52,9 +52,9 @@ function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json:
             <textarea className={`${inputCls} h-24 py-2`} value={comment} maxLength={2000}
               placeholder={t('vendors.regen.placeholder')} onChange={(e) => setComment(e.target.value)} />
           </label>
-          <Button variant="secondary" disabled={act.busy || !chosen} onClick={run}>
-            {act.busy ? t('vendors.regen.running') : t('vendors.regen.run')}
-          </Button>
+          {act.busy
+            ? <AiThinking title={t('vendors.regen.running')} hint={t('item.recipeFix.thinkingHint')} />
+            : <Button variant="secondary" disabled={!chosen} onClick={run}>{t('vendors.regen.run')}</Button>}
           {result !== null && <Notice tone={result ? 'ok' : 'warn'}>{result ? t('vendors.regen.ok') : t('vendors.regen.miss')}</Notice>}
           <ErrorText>{act.error}</ErrorText>
         </>
@@ -182,7 +182,7 @@ export default function Vendors() {
         ))}
       </dl>
       <Card>
-        {list.loading && !list.data ? <Loading /> : list.error ? <ErrorText>{list.error}</ErrorText> : !list.data?.length ? <Empty>{t('vendors.empty')}</Empty> : (
+        {list.loading && !list.data ? <Loading rows={5} /> : list.error ? <ErrorText>{list.error}</ErrorText> : !list.data?.length ? <Empty>{t('vendors.empty')}</Empty> : (
           <ul>
             {list.data.map((v) => <VendorRow key={v.key} vendor={v} categories={categories} onChange={replace} />)}
           </ul>

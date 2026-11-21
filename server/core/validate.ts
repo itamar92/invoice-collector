@@ -56,7 +56,7 @@ export function validateFields(
   if (f.total === null) problems.push('missing_total');
   else {
     if (f.docType !== 'credit_note' && f.total <= 0) problems.push('nonpositive_total');
-    if (!vatConsistent(f, s.vatRate)) problems.push('vat_mismatch');
+    if (!f.vatConfirmed && !vatConsistent(f, s.vatRate)) problems.push('vat_mismatch');
   }
 
   return problems.length ? { ok: false, problems } : { ok: true };

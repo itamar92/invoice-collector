@@ -131,7 +131,7 @@ export default function Dashboard() {
       </PageTitle>
       <p className="text-sm text-muted">{t('dash.intro')}</p>
       <NotFiledYet />
-      {load.loading && !s && <Loading />}
+      {load.loading && !s && <Loading rows={3} />}
       <ErrorText>{load.error}</ErrorText>
 
       {s && built && (

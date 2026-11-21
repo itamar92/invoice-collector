@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigationType } from 'react-router-dom';
 import { api, GMAIL_SEND_SCOPE } from './api.js';
 import type { SettingsResponse } from './api.js';
-import { Button, CountBadge, ErrorText, fmtDateTime, Icon, Notice, takeFlash, useAction, useApp } from './components/ui.js';
+import { AiThinking, Button, CountBadge, ErrorText, fmtDateTime, Icon, LoadingBar, Notice, takeFlash, useAction, useApp } from './components/ui.js';
 import { useUploadReceipt } from './components/UploadReceipt.js';
 import { InstallBanner, useInstallApp } from './components/InstallApp.js';
 import type { IconName } from './components/ui.js';
@@ -120,6 +120,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="min-h-dvh md:flex">
+      <LoadingBar />
       {/* phone: top bar with the worker status */}
       <header className="sticky top-0 z-20 border-b border-line bg-ground md:hidden">
         <div className="flex items-center justify-between gap-2 px-4 py-2">
@@ -127,11 +128,11 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             <Brand />
           </Link>
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="secondary" className="bg-white px-3 shadow-soft" disabled={run.busy} onClick={runNow}>
+            <Button variant="secondary" className="bg-white px-3 shadow-soft" loading={run.busy} onClick={runNow}>
               {run.busy ? t('worker.running') : t('worker.runNow')}
             </Button>
-            <Button className="w-11 px-0 shadow-soft" disabled={upload.busy} onClick={upload.pick} aria-label={t('upload.button')} title={t('upload.button')}>
-              <Icon name="camera" />
+            <Button className="w-11 px-0 shadow-soft" loading={upload.busy} onClick={upload.pick} aria-label={t('upload.button')} title={t('upload.button')}>
+              {upload.busy ? <span className="ai-dots"><span /><span /><span /></span> : <Icon name="camera" />}
             </Button>
           </div>
         </div>
@@ -152,8 +153,8 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </NavLink>
           ))}
         </nav>
-        <Button className="mx-2 mt-4 shadow-soft" disabled={upload.busy} onClick={upload.pick}>
-          <Icon name="camera" />{t('upload.button')}
+        <Button className="mx-2 mt-4 shadow-soft" loading={upload.busy} onClick={upload.pick}>
+          {!upload.busy && <Icon name="camera" />}{upload.busy ? t('upload.busyShort') : t('upload.button')}
         </Button>
         {install.available && (
           <button type="button" onClick={() => void install.install()}
@@ -164,7 +165,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <div className="mt-auto space-y-2 px-2 text-xs text-muted">
           <p>{lastRun}</p>
           {!active && <p>{t('worker.notActive')}</p>}
-          <Button variant="secondary" className="w-full bg-white shadow-soft" disabled={run.busy} onClick={runNow}>
+          <Button variant="secondary" className="w-full bg-white shadow-soft" loading={run.busy} onClick={runNow}>
             {run.busy ? t('worker.running') : t('worker.runNow')}
           </Button>
           <button type="button" onClick={() => void logout()} className="min-h-8 font-medium text-ink underline">{t('logout')}</button>
@@ -177,7 +178,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <div className="md:hidden"><InstallBanner install={install} /></div>
           <ErrorText>{run.error}</ErrorText>
           {flash && <div role="status" className="sticky top-16 z-20 md:top-4"><Notice tone="ok">{flash}</Notice></div>}
-          {upload.busy && <Notice>{t('upload.busy')}</Notice>}
+          {upload.busy && <div className="sticky top-16 z-20 md:top-4"><AiThinking title={t('upload.busy')} hint={t('upload.busyHint')} /></div>}
           <ErrorText>{upload.error}</ErrorText>
           {summary?.lastTickError && <ErrorText>{t('banner.tickError', { error: summary.lastTickError })}</ErrorText>}
           {problems.length > 0 && (

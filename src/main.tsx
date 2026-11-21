@@ -30,7 +30,7 @@ function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
 
-  const refreshSummary = useCallback(async () => { try { setSummary(await api.summary()); } catch { /* banner keeps last value */ } }, []);
+  const refreshSummary = useCallback(async () => { try { setSummary(await api.summary(true)); } catch { /* banner keeps last value */ } }, []);
   const refreshSettings = useCallback(async () => { setSettings(await api.settings()); }, []);
 
   const boot = useCallback(async () => {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { FolderEntry, StorageDestination } from '../core/types.js';
-import { FolderNotFoundError, TransientError } from '../core/types.js';
+import { FolderConflictError, FolderNotFoundError, TransientError } from '../core/types.js';
 import { getSecret } from '../secrets.js';
 
 const BLOCK = 4 * 1024 * 1024;
@@ -91,6 +91,23 @@ export class DropboxStorage implements StorageDestination {
       r = await req('https://api.dropboxapi.com/2/files/list_folder/continue', { cursor: r.body.cursor });
     }
     return out.sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  }
+
+  /** Makes a folder now (not on the first filing), so it can be browsed into and picked right away. */
+  async createFolder(parent: string, name: string): Promise<FolderEntry> {
+    const p = ('/' + parent + '/' + name).replace(/\/{2,}/g, '/').replace(/\/$/, '');
+    const r = await this.call((tok) => this.f('https://api.dropboxapi.com/2/files/create_folder_v2', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: p, autorename: false }),
+    }));
+    const s = summary(r.body);
+    if (r.status === 409 && /path\/conflict\/folder/.test(s)) return { name, path: p }; // already there: fine
+    if (r.status === 409 && /path\/conflict/.test(s)) throw new FolderConflictError(p);
+    if (r.status === 409 && /path\/not_found|path\/malformed/.test(s)) throw new FolderNotFoundError(parent);
+    this.assertOk(r);
+    const md = r.body?.metadata;
+    return { name: typeof md?.name === 'string' ? md.name : name, path: typeof md?.path_display === 'string' ? md.path_display : p };
   }
 
   private assertOk(r: ApiResult): void {

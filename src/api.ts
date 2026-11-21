@@ -23,7 +23,7 @@ export interface Item {
 }
 export interface ItemEvent { at: string; from: string | null; to: string; note: string | null }
 /** emailMode 'backfill': the item can be filed but is never sent to Morning, so the UI offers no "send". */
-export type ItemDetail = Item & { events: ItemEvent[]; emailMode: 'ongoing' | 'backfill' | 'manual' | null };
+export type ItemDetail = Item & { events: ItemEvent[]; emailMode: 'ongoing' | 'backfill' | 'manual' | null; hasText: boolean };
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
 export interface Vendor { key: string; displayName: string; status: VendorStatus; defaultCategory: string | null; createdAt: string }
@@ -63,10 +63,27 @@ export class ApiError extends Error {
   }
 }
 
+// ---------- requests in flight (drives the top loading bar) ----------
+let inFlight = 0;
+const busyListeners = new Set<(n: number) => void>();
+const setInFlight = (d: number) => { inFlight += d; for (const l of busyListeners) l(inFlight); };
+/** Calls `fn` with the number of requests in flight whenever it changes; returns the unsubscribe. */
+export function onRequestsInFlight(fn: (n: number) => void): () => void {
+  busyListeners.add(fn); fn(inFlight);
+  return () => { busyListeners.delete(fn); };
+}
+
 let onUnauthorized: () => void = () => {};
 export function setUnauthorizedHandler(fn: () => void): void { onUnauthorized = fn; }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** `quiet`: a background poll, which does not show the loading bar. */
+async function request<T>(method: string, path: string, body?: unknown, quiet = false): Promise<T> {
+  if (quiet) return send0<T>(method, path, body);
+  setInFlight(1);
+  try { return await send0<T>(method, path, body); } finally { setInFlight(-1); }
+}
+
+async function send0<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -88,7 +105,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
-const get = <T>(p: string) => request<T>('GET', p);
+const get = <T>(p: string, quiet = false) => request<T>('GET', p, undefined, quiet);
 const send = <T>(m: 'POST' | 'PUT', p: string, b: unknown = {}) => request<T>(m, p, b);
 const del = <T>(p: string) => request<T>('DELETE', p);
 const enc = encodeURIComponent;
@@ -97,7 +114,8 @@ export const api = {
   login: (password: string) => send<void>('POST', '/api/login', { password }),
   logout: () => send<void>('POST', '/api/logout'),
   me: () => get<{ ok: true }>('/api/me'),
-  summary: () => get<Summary>('/api/summary'),
+  /** `quiet`: the periodic refresh, without the loading bar. */
+  summary: (quiet = false) => get<Summary>('/api/summary', quiet),
   stats: (year?: number) => get<Stats>(`/api/stats${year ? `?year=${year}` : ''}`),
   runWorker: () => send<Summary>('POST', '/api/worker/run'),
 
@@ -132,7 +150,7 @@ export const api = {
     send<{ recipe: Record<string, unknown>; reproduces: boolean }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
   setAiAlways: (key: string, value: boolean) => send<{ ok: true }>('PUT', `/api/vendors/${enc(key)}/ai-always`, { value }),
 
-  backfill: () => get<BackfillStatus>('/api/backfill'),
+  backfill: (quiet = false) => get<BackfillStatus>('/api/backfill', quiet),
   /** 202: the run continues in the background; 409 backfill_running if one is already going. */
   startBackfill: () => send<{ started: true }>('POST', '/api/backfill/start'),
   approveBackfill: (ids: string[]) => send<{ ok: true }>('POST', '/api/backfill/approve', { ids }),
@@ -158,6 +176,9 @@ export const api = {
   morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),
   /** Subfolders of a Dropbox path ('' = the top). 404 folder_not_found when it does not exist. */
   dropboxFolders: (path: string) => get<{ path: string; folders: { name: string; path: string }[] }>(`/api/dropbox/folders?path=${enc(path)}`),
+  /** Creates a folder in Dropbox now; 409 folder_conflict when a file has that name. */
+  createDropboxFolder: (parent: string, name: string) =>
+    send<{ folder: { name: string; path: string } }>('POST', '/api/dropbox/folders', { parent, name }),
   gmailLabels: () => get<{ labels: string[] }>('/api/gmail/labels'),
 };
 

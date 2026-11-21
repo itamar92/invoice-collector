@@ -213,6 +213,24 @@ test('oauth callback: unknown state 400; valid state exchanges code once and sto
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('createFolder: makes the folder now; an existing folder is fine; a file of that name is a conflict', async () => {
+  const ok = fakeFetch([() => tokenOk(), () => json(200, { metadata: { name: 'קבלות 2026', path_display: '/Docs/קבלות 2026' } })]);
+  assert.deepEqual(await new DropboxStorage({ fetchImpl: ok.impl }).createFolder('/Docs/', 'קבלות 2026'),
+    { name: 'קבלות 2026', path: '/Docs/קבלות 2026' });
+  assert.match(ok.calls[1]!.url, /files\/create_folder_v2$/);
+  assert.deepEqual(JSON.parse(String(ok.calls[1]!.init.body)), { path: '/Docs/קבלות 2026', autorename: false });
+
+  const top = fakeFetch([() => tokenOk(), () => json(200, { metadata: { name: 'X', path_display: '/X' } })]);
+  await new DropboxStorage({ fetchImpl: top.impl }).createFolder('', 'X');
+  assert.equal(JSON.parse(String(top.calls[1]!.init.body)).path, '/X');
+
+  const there = fakeFetch([() => tokenOk(), () => json(409, { error_summary: 'path/conflict/folder/..' })]);
+  assert.deepEqual(await new DropboxStorage({ fetchImpl: there.impl }).createFolder('/Docs', 'A'), { name: 'A', path: '/Docs/A' });
+
+  const file = fakeFetch([() => tokenOk(), () => json(409, { error_summary: 'path/conflict/file/..' })]);
+  await assert.rejects(new DropboxStorage({ fetchImpl: file.impl }).createFolder('/Docs', 'a.pdf'), (e: Error) => e.name === 'FolderConflictError');
+});
+
 test('listFolders: folders only, sorted, follows has_more; top is ""; a missing folder is FolderNotFoundError', async () => {
   const { impl, calls } = fakeFetch([
     () => tokenOk(),

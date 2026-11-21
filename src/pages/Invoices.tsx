@@ -54,7 +54,7 @@ export default function Invoices() {
           <span className="hidden md:block">{t('common.date')}</span>
           <span className="text-end">{t('common.total')}</span>
         </div>
-        {list.loading && !list.data ? <Loading /> : list.error ? <ErrorText>{list.error}</ErrorText> : items.length === 0 ? <Empty /> : (
+        {list.loading && !list.data ? <Loading rows={6} /> : list.error ? <ErrorText>{list.error}</ErrorText> : items.length === 0 ? <Empty /> : (
           <ul>
             {items.map((i) => (
               <li key={i.id} className={rowCls}>
