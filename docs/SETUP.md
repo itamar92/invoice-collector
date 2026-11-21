@@ -1,6 +1,6 @@
 # Setup guide
 
-Self-hosting invoice-collector end to end: run the container, connect Gmail and Dropbox, optionally connect
+Self-hosting invoice-collector end to end: run the container, connect Gmail and your cloud storage (Dropbox or Google Drive), optionally connect
 Morning (accounting), choose an AI provider, and put the whole thing behind Cloudflare Access.
 
 Throughout, `PUBLIC_URL` is the public base URL of your instance, with no trailing slash (for example
@@ -116,11 +116,18 @@ that label in Settings. The collector then reads only labelled mail, which keeps
 cost) small. Without a label it scans the whole inbox. Mail that is not matched by a recipe is sent to the AI
 provider, so fewer candidate messages means fewer tokens.
 
-## 3. Dropbox
+## 3. Cloud storage: Dropbox or Google Drive
+
+Filed PDFs go to **one** cloud: Dropbox or Google Drive. Pick it in Settings (Connections, "Cloud storage") and
+connect it. The two are never used together: connecting one disconnects the other (its stored token is
+deleted). Documents already filed stay where they are; only new filings go to the newly chosen cloud. You only
+need to set up the one you use.
+
+### 3a. Dropbox
 
 1. Create an app at the [Dropbox App Console](https://www.dropbox.com/developers/apps): **Scoped access**,
    **App folder** access. The app name you choose is the folder name in the Dropbox; see
-   [Where documents are saved](#where-documents-are-saved) below.
+   [Where documents are saved in Dropbox](#where-documents-are-saved-in-dropbox) below.
 2. Permissions tab, enable exactly:
    - `files.content.write`
    - `files.metadata.read`
@@ -137,7 +144,7 @@ provider, so fewer candidate messages means fewer tokens.
 
 Files are never overwritten: if a file with the same name exists and differs, a numbered name is used.
 
-### Where documents are saved
+#### Where documents are saved in Dropbox
 
 The app can read and write only its own folder in the Dropbox, and nothing else. Dropbox creates that folder as
 `Dropbox/Apps/<app name>` the first time the app writes to it, and every path in the app (the storage root, the
@@ -152,10 +159,35 @@ folder template, the folder browser in Settings) starts from there. A storage ro
 - PDFs moved out of the app folder are out of the app's sight. Filed documents are never filed again, so
   nothing breaks, but the first-import "likely duplicate" hint cannot see them.
 
+### 3b. Google Drive
+
+Google Drive uses the same Google OAuth client as Gmail (section 2) and the same redirect URI, so there is
+nothing new to put in `.env`.
+
+1. In the same Google Cloud project, enable the **Google Drive API**.
+2. On the OAuth consent screen, add the scope `https://www.googleapis.com/auth/drive` (in testing mode you can
+   skip this; Google asks for it when you connect).
+3. In Settings choose **Google Drive** under "Cloud storage" and press connect.
+
+Drive gets its own token, separate from Gmail's, so either can be reconnected on its own.
+
+Scope requested:
+
+| Scope | Why |
+|---|---|
+| `https://www.googleapis.com/auth/drive` | Browse your existing folders in the Settings folder picker and file PDFs into them. (The narrower `drive.file` scope cannot see folders the app did not create.) |
+
+#### Where documents are saved in Google Drive
+
+Paths start at the top of **My Drive**: a storage root of `/חשבוניות` files into the `חשבוניות` folder at the top
+of your Drive, and missing folders are created on the first filing. Drive allows two folders with the same name;
+the app always uses the oldest one, so keep one folder per name to avoid confusion. Files are never overwritten:
+a same-named file with different content gets a numbered name.
+
 ## 4. Morning (accounting), optional
 
 Morning (formerly Green Invoice) receives expenses so your accountant sees them. It is optional; without it
-documents are still filed in Dropbox.
+documents are still filed in your cloud storage.
 
 1. In Morning go to the settings area for developer tools / API keys and create an API key. You get a key **id**
    and a **secret**. Exact menu names change; follow Morning's own API documentation

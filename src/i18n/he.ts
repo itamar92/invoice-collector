@@ -20,7 +20,7 @@ const REASONS = {
   link_blocked: 'הקישור במייל נחסם מטעמי אבטחה',
   link_too_large: 'הקובץ בקישור גדול מדי',
   link_failed: 'ההורדה מהקישור נכשלה (אולי פג תוקפו)',
-  storage_error: 'השמירה ב-Dropbox נכשלה',
+  storage_error: 'השמירה ב-{cloud} נכשלה',
   accounting_error: 'השליחה ל-Morning נכשלה או נדחתה',
   recipe_rewritten: 'המתכון של הספק נכתב מחדש — כדאי לבדוק',
   duplicate: 'כפילות של מסמך קיים',
@@ -35,7 +35,7 @@ const STATES = {
   awaiting_vendor: 'ממתין להחלטה על הספק',
   awaiting_backfill_approval: 'ממתין לאישור (ייבוא ראשון)',
   ready: 'מוכן לתיוק',
-  stored: 'נשמר ב-Dropbox',
+  stored: 'נשמר ב-{cloud}',
   done: 'הושלם',
   ignored: 'התעלמות',
   dismissed: 'נדחה',
@@ -82,7 +82,7 @@ export const he = {
   'nav.dashboard': 'סיכום',
 
   'dash.title': 'סיכום',
-  'dash.intro': 'מסמכים שתויקו ב-Dropbox, לפי תאריך המסמך.',
+  'dash.intro': 'מסמכים שתויקו ב-{cloud}, לפי תאריך המסמך.',
   'dash.year': 'שנה',
   'dash.filed': 'מסמכים שתויקו',
   'dash.total': 'סכום כולל',
@@ -94,7 +94,7 @@ export const he = {
   'dash.empty': 'עדיין לא תויקו מסמכים בשנה הזאת',
   'dash.otherCurrency': '{n} מסמכים במטבע אחר נספרים, אבל לא נכללים בסכומים',
   'dash.pending.title': 'עוד לא בסיכום',
-  'dash.pending.intro': 'הסיכום מציג רק מסמכים שכבר נשמרו ב-Dropbox. אלה נמצאו, ומחכים לצעד הבא:',
+  'dash.pending.intro': 'הסיכום מציג רק מסמכים שכבר נשמרו ב-{cloud}. אלה נמצאו, ומחכים לצעד הבא:',
   'dash.pending.backfill': '{n} מסמכים מהייבוא הראשון ממתינים לאישור שלך',
   'dash.pending.vendor': '{n} מסמכים ממתינים להחלטה על ספק חדש',
   'dash.pending.attention': '{n} מסמכים דורשים תיקון',
@@ -121,6 +121,7 @@ export const he = {
   'banner.fix': 'להגדרות',
   'conn.gmail': 'Gmail',
   'conn.dropbox': 'Dropbox',
+  'conn.gdrive': 'Google Drive',
   'conn.morning': 'Morning',
 
   // common
@@ -157,7 +158,7 @@ export const he = {
   'common.page': 'עמוד {n}',
 
   // errors from the API
-  'error.not_connected': 'Gmail או Dropbox עדיין לא מחוברים',
+  'error.not_connected': 'Gmail או {cloud} עדיין לא מחוברים',
   'error.worker_unavailable': 'העבודה האוטומטית לא זמינה כרגע',
   'error.ai_not_configured': 'לא הוגדר ספק AI',
   'error.item_not_editable': 'אי אפשר לערוך מסמך במצב הזה',
@@ -172,10 +173,10 @@ export const he = {
   'error.ai_unavailable': 'ה-AI לא זמין כרגע. נסו שוב בעוד רגע.',
   'error.ai_bad_recipe': 'ה-AI לא הצליח לכתוב מתכון תקין. נסו שוב, אולי עם הערה אחרת.',
   'error.vendor_not_found': 'הספק לא נמצא',
-  'error.folder_conflict': 'כבר יש ב-Dropbox קובץ בשם הזה. בחרו שם אחר.',
-  'error.folder_not_found': 'התיקייה לא נמצאה ב-Dropbox',
-  'error.dropbox_unavailable': 'Dropbox לא ענה. בדקו את החיבור בהגדרות.',
+  'error.folder_conflict': 'כבר יש ב-{cloud} קובץ בשם הזה. בחרו שם אחר.',
+  'error.folder_not_found': 'התיקייה לא נמצאה ב-{cloud}',
   'error.google_not_configured': 'חסרים בשרת GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / PUBLIC_URL',
+  'error.storage_unavailable': '{cloud} לא ענה. בדקו את החיבור בהגדרות.',
   'error.dropbox_not_configured': 'חסרים בשרת DROPBOX_APP_KEY / PUBLIC_URL',
   'error.unauthorized': 'צריך להתחבר מחדש',
   'error.not_found': 'לא נמצא',
@@ -214,8 +215,8 @@ export const he = {
   'vendorStatus.personal': 'פרטי',
   'vendorStatus.ignored': 'להתעלם',
   'vendorStatus.unreviewed': 'טרם הוחלט',
-  'vendorStatus.businessHint': 'יתויק ב-Dropbox ויישלח ל-Morning לפי הקטגוריה',
-  'vendorStatus.personalHint': 'יתויק ב-Dropbox בלבד, לא יישלח ל-Morning',
+  'vendorStatus.businessHint': 'יתויק ב-{cloud} ויישלח ל-Morning לפי הקטגוריה',
+  'vendorStatus.personalHint': 'יתויק ב-{cloud} בלבד, לא יישלח ל-Morning',
   'vendorStatus.ignoredHint': 'לא יתויק ולא יישלח',
 
   // attention
@@ -305,7 +306,7 @@ export const he = {
 
   // backfill
   'backfill.title': 'ייבוא ראשון',
-  'backfill.intro': 'אלה החשבוניות מתחילת השנה. מה שתאשרו יישמר ב-Dropbox בלבד — שום דבר מהייבוא הראשון לא נשלח ל-Morning.',
+  'backfill.intro': 'אלה החשבוניות מתחילת השנה. מה שתאשרו יישמר ב-{cloud} בלבד — שום דבר מהייבוא הראשון לא נשלח ל-Morning.',
   'backfill.filename': 'שם הקובץ',
   'backfill.folder': 'תיקייה',
   'backfill.duplicate': 'כנראה כבר קיים',
@@ -324,10 +325,10 @@ export const he = {
   'backfill.restart': 'הפעלה מחדש של הייבוא',
   'backfill.result': 'הייבוא הסתיים: {emails} מיילים, {items} מסמכים{failed}',
   'backfill.startedAt': 'התחיל ב-{when}',
-  'backfill.notConnected': 'כדי לראות את הרשימה צריך לחבר את Gmail ואת Dropbox.',
+  'backfill.notConnected': 'כדי לראות את הרשימה צריך לחבר את Gmail ואת {cloud}.',
   'backfill.stepsTitle': 'מה עכשיו?',
   'backfill.step1': 'מחליטים על כל ספק חדש (עסקי / פרטי / התעלמות). מסמכים של ספק בלי החלטה עוד לא מופיעים לאישור.',
-  'backfill.step2': 'מסמנים את המסמכים ברשימה ולוחצים "אישור". הם נשמרים ב-Dropbox ומופיעים בדף הסיכום.',
+  'backfill.step2': 'מסמנים את המסמכים ברשימה ולוחצים "אישור". הם נשמרים ב-{cloud} ומופיעים בדף הסיכום.',
   'backfill.step3': 'כשסיימתם, לוחצים "סיום הייבוא" למעלה. מעכשיו כל חשבונית חדשה מטופלת אוטומטית.',
 
   // vendors
@@ -377,7 +378,7 @@ export const he = {
 
   // setup
   'setup.title': 'הגדרה ראשונית',
-  'setup.intro': 'חמישה צעדים קצרים, ואחר כך החשבוניות יגיעו לבד ל-Dropbox ול-Morning.',
+  'setup.intro': 'חמישה צעדים קצרים, ואחר כך החשבוניות יגיעו לבד ל-{cloud} ול-Morning.',
   'setup.step': 'צעד {n} מתוך 5',
   'setup.s1': 'חיבורים',
   'setup.s2': 'AI',
@@ -387,7 +388,11 @@ export const he = {
   'setup.connectedToast': '{name} חובר בהצלחה',
 
   'connect.gmailHint': 'כדי לקרוא מיילים עם חשבוניות ולסמן אותם כמטופלים.',
-  'connect.dropboxHint': 'כדי לשמור את קובצי ה-PDF בתיקיות לפי שנה וקטגוריה.',
+  'connect.storageHint': 'כדי לשמור את קובצי ה-PDF בתיקיות לפי שנה וקטגוריה.',
+  'connect.storage': 'אחסון בענן',
+  'connect.storageChoose': 'בוחרים שירות אחד לשמירת הקבצים. אי אפשר לעבוד עם שניהם יחד.',
+  'connect.storageSwitchConfirm': 'מעבר ל-{to} ינתק את {from}. מסמכים שכבר נשמרו ב-{from} יישארו שם, ומסמכים חדשים יישמרו ב-{to} אחרי שתחברו אותו. להמשיך?',
+  'connect.storageSwitched': 'עכשיו מחברים את {name} עם הכפתור למטה.',
   'connect.connect': 'חיבור',
   'connect.reconnect': 'חיבור מחדש',
   'connect.morningHint': 'מזהה ומפתח API מתוך Morning ← הגדרות ← כלים למפתחים.',
@@ -452,7 +457,7 @@ export const he = {
   'label.current': 'כרגע: {label}',
   'label.currentAll': 'כרגע: סריקת כל המיילים',
 
-  'cat.intro': 'קטגוריות קובעות את התיקייה ב-Dropbox, ואילו הוצאות נשלחות ל-Morning.',
+  'cat.intro': 'קטגוריות קובעות את התיקייה ב-{cloud}, ואילו הוצאות נשלחות ל-Morning.',
   'cat.name': 'קטגוריה',
   'cat.send': 'שליחה ל-Morning',
   'cat.classification': 'סיווג ב-Morning (לא חובה)',
@@ -463,7 +468,7 @@ export const he = {
   'cat.classificationsUnavailable': 'לא הצלחנו לטעון סיווגים מ-Morning. אפשר להקליד מזהה סיווג ידנית.',
   'cat.classificationsRefresh': 'רענון סיווגים',
   'cat.fromMorning.title': 'קטגוריות מ-Morning',
-  'cat.fromMorning.hint': 'מחליף את רשימת הקטגוריות ב-{n} הסיווגים שלכם ב-Morning, כל אחד מקושר לסיווג שלו — וכך לכל סיווג תהיה תיקייה משלו ב-Dropbox (דרך {category} בתבנית התיקייה). הקטגוריות המובנות והאחרות יוסרו. השינוי נשמר רק אחרי "שמירה".',
+  'cat.fromMorning.hint': 'מחליף את רשימת הקטגוריות ב-{n} הסיווגים שלכם ב-Morning, כל אחד מקושר לסיווג שלו — וכך לכל סיווג תהיה תיקייה משלו ב-{cloud} (דרך {category} בתבנית התיקייה). הקטגוריות המובנות והאחרות יוסרו. השינוי נשמר רק אחרי "שמירה".',
   'cat.fromMorning.confirm': 'להחליף את כל הקטגוריות הנוכחיות ב-{n} הקטגוריות של Morning? הקטגוריות האחרות יוסרו מהרשימה (השינוי נשמר רק אחרי "שמירה").',
   'cat.fromMorning.replaced': 'הרשימה הוחלפה ב-{n} הקטגוריות של Morning ({removed} הוסרו). בדקו ולחצו "שמירה" למטה.',
   'cat.fromMorning.button': 'שימוש בקטגוריות של Morning',
@@ -472,25 +477,27 @@ export const he = {
   'cat.remove': 'הסרה',
   'cat.add': 'הוספת קטגוריה',
   'cat.newName': 'שם קטגוריה חדשה',
-  'cat.root': 'תיקיית הבסיס ב-Dropbox',
+  'cat.root': 'תיקיית הבסיס ב-{cloud}',
+  'cat.rootHint.gdrive': 'הנתיב הוא בתוך "האחסון שלי" ב-Google Drive. למשל /חשבוניות נשמר בתיקייה חשבוניות שבראש ה-Drive. בוחרים עם "עיון" או מקלידים.',
   'cat.rootHint': 'הנתיב הוא בתוך תיקיית האפליקציה ב-Dropbox (Apps/<שם האפליקציה>). למשל /חשבוניות נשמר ב-Dropbox/Apps/<שם האפליקציה>/חשבוניות. בוחרים עם "עיון" או מקלידים.',
-  'folders.browse': 'עיון ב-Dropbox',
+  'folders.browse': 'עיון ב-{cloud}',
   'folders.close': 'סגירה',
   'folders.top': 'תיקיית האפליקציה',
   'folders.up': 'למעלה',
   'folders.loading': 'טוען תיקיות…',
   'folders.empty': 'אין כאן תיקיות משנה.',
+  'folders.top.gdrive': 'האחסון שלי',
   'folders.appFolderHint': 'כל המסמכים נשמרים ב-Dropbox שלכם בתיקייה Apps/<שם האפליקציה>, וזו התיקייה שמוצגת כאן. בתוכה אפשר ליצור תיקיות משנה, לשנות להן שם ולשתף אותן. את התיקייה עצמה לא מעבירים ולא משנים לה שם: Dropbox ינתק אותה מהמערכת וייצור במקומה תיקייה ריקה חדשה.',
   'folders.choose': 'בחירת התיקייה הזאת',
   'folders.chooseNamed': 'בחירה: {path}',
   'folders.new': 'תיקייה חדשה כאן',
   'folders.newPlaceholder': 'שם התיקייה החדשה',
-  'folders.newHint': 'התיקייה תיווצר עכשיו ב-Dropbox בתוך {where}, והחלון ייכנס אליה.',
+  'folders.newHint': 'התיקייה תיווצר עכשיו ב-{cloud} בתוך {where}, והחלון ייכנס אליה.',
   'folders.create': 'יצירת תיקייה',
-  'folders.created': 'התיקייה {name} נוצרה ב-Dropbox.',
+  'folders.created': 'התיקייה {name} נוצרה ב-{cloud}.',
   'folders.badName': 'שם תיקייה לא יכול לכלול את התווים \\ / : * ? " < > | או להסתיים בנקודה או ברווח.',
   'folders.open': 'כניסה לתיקייה {name}',
-  'folders.missingStart': 'התיקייה {path} עוד לא קיימת ב-Dropbox. מציגים את התיקייה העליונה.',
+  'folders.missingStart': 'התיקייה {path} עוד לא קיימת ב-{cloud}. מציגים את התיקייה העליונה.',
   'cat.folderTemplate': 'תבנית תיקייה',
   'cat.filenameTemplate': 'תבנית שם קובץ',
   'cat.placeholders': 'אפשר להשתמש ב: {root} {year} {date} {category} {docType} {vendor} {description} {amount} {currency}',
@@ -499,7 +506,7 @@ export const he = {
   'cat.sampleVendor': 'ספק לדוגמה',
   'cat.sampleDescription': 'מנוי חודשי',
 
-  'start.intro': 'הייבוא הראשון אוסף את החשבוניות מ-1 בינואר השנה ומציג לכם רשימה לאישור לפני שמירה ב-Dropbox.',
+  'start.intro': 'הייבוא הראשון אוסף את החשבוניות מ-1 בינואר השנה ומציג לכם רשימה לאישור לפני שמירה ב-{cloud}.',
   'start.noMorning': 'שום דבר מהייבוא הראשון לא נשלח ל-Morning.',
   'start.cost': 'כאן ה-AI עושה את רוב העבודה (מתכונים לספקים חדשים), ולכן זה החלק היקר יחסית.',
   'start.n8n': 'אם יש לכם תהליך אחר שמתייק חשבוניות (למשל n8n) — כבו אותו קודם כדי שלא יתויק פעמיים.',
@@ -554,8 +561,13 @@ export const he = {
 export type MessageKey = keyof typeof he;
 
 /** Hebrew text for `key`, with `{name}` placeholders filled from `vars`. */
+let cloudName = 'Dropbox';
+/** The chosen cloud storage's display name, filled into `{cloud}` everywhere (set when settings load). */
+export function setCloudName(name: string): void { cloudName = name; }
+
 export function t(key: MessageKey, vars: Record<string, string | number> = {}): string {
-  return he[key].replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m));
+  const all: Record<string, string | number> = { cloud: cloudName, ...vars };
+  return he[key].replace(/\{(\w+)\}/g, (m, k: string) => (k in all ? String(all[k]) : m));
 }
 
 /** For keys built at runtime (reason/state/error codes); falls back to `fallback`'s text. */

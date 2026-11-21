@@ -5,7 +5,7 @@ import './index.css';
 import { api, setUnauthorizedHandler } from './api.js';
 import type { SettingsResponse, Summary } from './api.js';
 import { AppContext, Button, ErrorText, Loading } from './components/ui.js';
-import { t } from './i18n/he.js';
+import { setCloudName, t } from './i18n/he.js';
 import Layout from './Layout.js';
 import Attention from './pages/Attention.js';
 import Backfill from './pages/Backfill.js';
@@ -64,6 +64,8 @@ function App() {
   if (!authed) return <Login onLoggedIn={() => void boot()} />;
   if (!settings) return <Loading />;
 
+  // Every "{cloud}" in the Hebrew text names the chosen storage; set before the tree below renders.
+  setCloudName(settings.settings.storageProvider === 'gdrive' ? t('conn.gdrive') : t('conn.dropbox'));
   const setupDone = settings.settings.setupComplete;
   const page = (el: React.ReactNode) => (setupDone ? el : <ToSetup />);
 

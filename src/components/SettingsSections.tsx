@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildFilename, buildFolder } from '../../server/core/naming.js';
-import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
+import { api, GMAIL_SEND_SCOPE, startOAuth, STORAGE_SECRET, storageConnected } from '../api.js';
 import { replaceWithMorningCategories } from '../morningCategories.js';
 import { FolderPicker } from './FolderPicker.js';
-import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings } from '../api.js';
+import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings, StorageProvider } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
 import { Button, Check, ErrorText, Spinner, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp, useLoad } from './ui.js';
@@ -39,6 +39,47 @@ function ConnectRow({ name, hint, ok, onConnect }: { name: string; hint: string;
   );
 }
 
+const STORAGES: StorageProvider[] = ['dropbox', 'gdrive'];
+const storageName = (p: StorageProvider) => t(p === 'gdrive' ? 'conn.gdrive' : 'conn.dropbox');
+
+/** One cloud for the PDFs: pick Dropbox or Google Drive, then connect it. Switching disconnects the other. */
+function StorageChoice() {
+  const { s, save } = useSettings();
+  const provider = s.settings.storageProvider;
+  const saving = useAction();
+  const [switched, setSwitched] = useState(false);
+
+  const choose = (to: StorageProvider) => {
+    if (to === provider) return;
+    // Switching away from a connected cloud deletes its token: ask first.
+    if (s.secrets[STORAGE_SECRET[provider]]
+      && !window.confirm(t('connect.storageSwitchConfirm', { from: storageName(provider), to: storageName(to) }))) return;
+    void saving.run(async () => { await save({ storageProvider: to }); setSwitched(true); });
+  };
+
+  return (
+    <div className={`space-y-2 py-3 ${rowCls}`}>
+      <fieldset className="space-y-2">
+        <legend className="mb-1 text-base font-semibold">{t('connect.storage')}</legend>
+        <p className={hintCls}>{t('connect.storageChoose')}</p>
+        <div className="flex flex-wrap gap-x-5 gap-y-1">
+          {STORAGES.map((p) => (
+            <label key={p} className="flex min-h-8 items-center gap-2 text-sm font-medium">
+              <input type="radio" name="storage-provider" className="size-4" checked={provider === p} disabled={saving.busy}
+                onChange={() => choose(p)} />
+              {storageName(p)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {switched && !storageConnected(s) && <Notice>{t('connect.storageSwitched', { name: storageName(provider) })}</Notice>}
+      <ErrorText>{saving.error}</ErrorText>
+      <ConnectRow name={storageName(provider)} hint={t('connect.storageHint')} ok={storageConnected(s)}
+        onConnect={() => startOAuth(`/api/oauth/${provider}/start`)} />
+    </div>
+  );
+}
+
 export function ConnectionsSection() {
   const { s, save, saveSecret } = useSettings();
   const { settings, secrets, morningModes } = s;
@@ -66,8 +107,7 @@ export function ConnectionsSection() {
     <div>
       <ConnectRow name={t('conn.gmail')} hint={t('connect.gmailHint')} ok={secrets.gmail_refresh}
         onConnect={() => startOAuth(gmailUrl(mode === 'email'))} />
-      <ConnectRow name={t('conn.dropbox')} hint={t('connect.dropboxHint')} ok={secrets.dropbox_refresh}
-        onConnect={() => startOAuth('/api/oauth/dropbox/start')} />
+      <StorageChoice />
 
       <div className="space-y-3 py-3">
         <div className="text-base font-semibold">{t('conn.morning')}</div>
@@ -396,15 +436,15 @@ export function CategoriesSection() {
 
       <div className="grid gap-3">
         <div>
-          <Field label={t('cat.root')} hint={t('cat.rootHint')}>
+          <Field label={t('cat.root')} hint={t(s.settings.storageProvider === 'gdrive' ? 'cat.rootHint.gdrive' : 'cat.rootHint')}>
             <input className={`${inputCls} ltr`} value={root} onChange={(e) => { setRoot(e.target.value); setSaved(false); }} />
           </Field>
           {/* Outside the label: its buttons must not focus the input. */}
           <div className="mt-2">
             {browsing
-              ? <FolderPicker value={root} onPick={(p) => { setRoot(p); setSaved(false); }} onClose={() => setBrowsing(false)} />
+              ? <FolderPicker value={root} provider={s.settings.storageProvider} onPick={(p) => { setRoot(p); setSaved(false); }} onClose={() => setBrowsing(false)} />
               : (
-                <Button variant="secondary" disabled={!s.secrets.dropbox_refresh} onClick={() => setBrowsing(true)}>
+                <Button variant="secondary" disabled={!storageConnected(s)} onClick={() => setBrowsing(true)}>
                   <Icon name="folder" />{t('folders.browse')}
                 </Button>
               )}

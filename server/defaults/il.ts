@@ -15,6 +15,7 @@ export const IL_DEFAULTS: Settings = {
   vatRate: 18,
   gmailLabel: null,
   gmailScopes: [],
+  storageProvider: 'dropbox', // installs from before Google Drive support were all Dropbox
   storageRoot: '',
   folderTemplate: '{root}/{year}/{category}',
   filenameTemplate: '{date}_{docType}_{vendor}_{description}_{amount}_{currency}',
