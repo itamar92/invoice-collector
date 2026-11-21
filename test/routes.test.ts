@@ -12,7 +12,7 @@ import { recordIngestFailure } from '../server/core/ingestFailures.js';
 import { compileRecipe } from '../server/core/recipe.js';
 import { saveRecipe, getVendor, upsertVendor, setVendorStatus } from '../server/core/recipeStore.js';
 import { vendorKeyFor } from '../server/core/pipeline.js';
-import { setSecret } from '../server/secrets.js';
+import { getSecret, setSecret } from '../server/secrets.js';
 import { getDb } from '../server/db.js';
 import { getSettings, updateSettings } from '../server/settings.js';
 import type { Deps, ExtractedFields } from '../server/core/types.js';
@@ -425,7 +425,7 @@ test('malformed JSON -> 400 JSON without a stack; authenticated unknown /api pat
   assert.equal(((await nf.json()) as any).error, 'not_found');
 });
 
-test('GET /api/dropbox/folders lists one level; 404 for a missing folder, 502 on failure, 503 when not connected', async () => {
+test('GET /api/storage/folders lists one level; 404 for a missing folder, 502 on failure, 503 when not connected', async () => {
   const { FolderNotFoundError } = await import('../server/core/types.js');
   const asked: string[] = [];
   const withFolders = (fn: (p: string) => Promise<{ name: string; path: string }[]>) => () => {
@@ -433,21 +433,21 @@ test('GET /api/dropbox/folders lists one level; 404 for a missing folder, 502 on
     return { deps: { ...d, storage: { ...d.storage, listFolders: fn } }, gmail };
   };
   const { call } = await boot({ getDeps: withFolders(async (p) => { asked.push(p); return [{ name: 'קבלות', path: '/קבלות' }]; }) });
-  const ok = await call('GET', `/api/dropbox/folders?path=${encodeURIComponent('/מסמכים')}`);
+  const ok = await call('GET', `/api/storage/folders?path=${encodeURIComponent('/מסמכים')}`);
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { path: '/מסמכים', folders: [{ name: 'קבלות', path: '/קבלות' }] });
   assert.deepEqual(asked, ['/מסמכים']);
   const nf = await boot({ getDeps: withFolders(async (p) => { throw new FolderNotFoundError(p); }) });
-  assert.equal((await nf.call('GET', '/api/dropbox/folders?path=/x')).status, 404);
+  assert.equal((await nf.call('GET', '/api/storage/folders?path=/x')).status, 404);
   const bad = await boot({ getDeps: withFolders(async () => { throw new Error('Dropbox 500 https://x.test/secret'); }) });
-  const r = await bad.call('GET', '/api/dropbox/folders');
+  const r = await bad.call('GET', '/api/storage/folders');
   assert.equal(r.status, 502);
-  assert.deepEqual(await r.json(), { error: 'dropbox_unavailable' });
+  assert.deepEqual(await r.json(), { error: 'storage_unavailable' });
   const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
-  assert.equal((await off.call('GET', '/api/dropbox/folders')).status, 503);
+  assert.equal((await off.call('GET', '/api/storage/folders')).status, 503);
 });
 
-test('POST /api/dropbox/folders creates one folder; bad names 400, a file of that name 409', async () => {
+test('POST /api/storage/folders creates one folder; bad names 400, a file of that name 409', async () => {
   const { FolderConflictError } = await import('../server/core/types.js');
   const made: [string, string][] = [];
   const withCreate = (fn: (p: string, n: string) => Promise<{ name: string; path: string }>) => () => {
@@ -455,18 +455,18 @@ test('POST /api/dropbox/folders creates one folder; bad names 400, a file of tha
     return { deps: { ...d, storage: { ...d.storage, createFolder: fn } }, gmail };
   };
   const { call } = await boot({ getDeps: withCreate(async (p, n) => { made.push([p, n]); return { name: n, path: `${p}/${n}` }; }) });
-  const ok = await call('POST', '/api/dropbox/folders', { parent: '/מסמכים', name: ' קבלות ' });
+  const ok = await call('POST', '/api/storage/folders', { parent: '/מסמכים', name: ' קבלות ' });
   assert.equal(ok.status, 201);
   assert.deepEqual(await ok.json(), { folder: { name: 'קבלות', path: '/מסמכים/קבלות' } });
   assert.deepEqual(made, [['/מסמכים', 'קבלות']]);
   for (const name of ['a/b', '..', 'x.', '', 'a:b']) {
-    assert.equal((await call('POST', '/api/dropbox/folders', { parent: '', name })).status, 400, name);
+    assert.equal((await call('POST', '/api/storage/folders', { parent: '', name })).status, 400, name);
   }
   assert.equal(made.length, 1);
   const clash = await boot({ getDeps: withCreate(async (p) => { throw new FolderConflictError(p); }) });
-  assert.equal((await clash.call('POST', '/api/dropbox/folders', { name: 'a.pdf' })).status, 409);
+  assert.equal((await clash.call('POST', '/api/storage/folders', { name: 'a.pdf' })).status, 409);
   const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
-  assert.equal((await off.call('POST', '/api/dropbox/folders', { name: 'x' })).status, 503);
+  assert.equal((await off.call('POST', '/api/storage/folders', { name: 'x' })).status, 503);
 });
 
 test('GET /api/gmail/labels lists labels from the live Gmail source; 503 when not connected or unsupported', async () => {
@@ -721,4 +721,25 @@ test('a throw while recording the backfill outcome never becomes an unhandled re
   } finally {
     process.off('unhandledRejection', onRej);
   }
+});
+
+test('PUT /api/settings storageProvider: one cloud at a time, switching deletes the other cloud\'s token', async () => {
+  const { call } = await boot();
+  setSecret('dropbox_refresh', 'DRT');
+  assert.equal(getSettings().storageProvider, 'dropbox');
+  assert.equal((await call('PUT', '/api/settings', { storageProvider: 'onedrive' })).status, 400);
+  const r = await call('PUT', '/api/settings', { storageProvider: 'gdrive' });
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.settings.storageProvider, 'gdrive');
+  assert.equal(body.secrets.dropbox_refresh, false);
+  assert.equal(getSecret('dropbox_refresh'), null);
+  // Choosing the same cloud again keeps its token.
+  setSecret('gdrive_refresh', 'GRT');
+  assert.equal((await call('PUT', '/api/settings', { storageProvider: 'gdrive' })).status, 200);
+  assert.equal(getSecret('gdrive_refresh'), 'GRT');
+  // And back: Drive is disconnected.
+  await call('PUT', '/api/settings', { storageProvider: 'dropbox' });
+  assert.equal(getSecret('gdrive_refresh'), null);
+  assert.equal(getSettings().storageProvider, 'dropbox');
 });

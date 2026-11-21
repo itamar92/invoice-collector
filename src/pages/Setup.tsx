@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { api, storageConnected } from '../api.js';
 import { AiSection, CategoriesSection, ConnectionsSection, LabelSection } from '../components/SettingsSections.js';
 import { Button, Card, ErrorText, Icon, Notice, useAction, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
-import { Brand } from '../Layout.js';
+import { Brand, connectedName } from '../Layout.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const STEPS: MessageKey[] = ['setup.s1', 'setup.s2', 'setup.s3', 'setup.s4', 'setup.s5'];
@@ -22,7 +22,7 @@ function StartBackfill({ onStarted }: { onStarted: () => void }) {
   const { settings, setSettings } = useApp();
   const a = useAction();
   const st = settings!.settings;
-  const connected = settings!.secrets.gmail_refresh && settings!.secrets.dropbox_refresh;
+  const connected = settings!.secrets.gmail_refresh && storageConnected(settings!);
   const alreadyStarted = !!st.backfillStartedAt && !st.backfillError; // a failed run may be started again
 
   const start = () => a.run(async () => {
@@ -108,7 +108,7 @@ export default function Setup() {
 
       {connected && (
         <p className="flex items-center justify-between gap-2 rounded-xl bg-ok-tint px-3 py-1 text-sm">
-          {t('setup.connectedToast', { name: connected === 'google' ? t('conn.gmail') : t('conn.dropbox') })}
+          {t('setup.connectedToast', { name: connectedName(connected) })}
           <button type="button" aria-label={t('common.cancel')} className="grid size-9 place-items-center" onClick={() => setParams({})}><Icon name="close" className="size-4" /></button>
         </p>
       )}

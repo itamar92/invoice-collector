@@ -7,6 +7,8 @@ export type AiSettings = {
   model?: string;
   ssh?: { host: string; port: number; user: string; hostKeySha256: string };
 };
+/** The one cloud the PDFs are filed to. Only one is connected at a time. */
+export type StorageProvider = 'dropbox' | 'gdrive';
 export type MorningSettings = { mode: 'api_fields' | 'api_file' | 'email' | null; inboxEmail?: string };
 
 export type Settings = {
@@ -17,6 +19,7 @@ export type Settings = {
   gmailLabel: string | null;
   /** OAuth scopes granted for Gmail (not a secret); the UI checks it for gmail.send. */
   gmailScopes: string[];
+  storageProvider: StorageProvider;
   storageRoot: string;
   folderTemplate: string;
   filenameTemplate: string;

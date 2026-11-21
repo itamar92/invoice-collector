@@ -6,6 +6,8 @@ import { envProblems, initDataStore } from './server/boot.js';
 import { serveSpa } from './server/spa.js';
 import { getAiProvider } from './server/ai/provider.js';
 import { DropboxStorage } from './server/destinations/dropbox.js';
+import { GoogleDriveStorage } from './server/destinations/gdrive.js';
+import { STORAGE_SECRET, storageFor } from './server/destinations/storage.js';
 import { MorningAccounting } from './server/destinations/morning.js';
 import { getSecret } from './server/secrets.js';
 import { getSettings } from './server/settings.js';
@@ -25,15 +27,15 @@ initDataStore(path.join(dataDir, 'app.db'));
 
 // Clients are cheap and hold only token caches; deps are rebuilt per tick so settings changes apply.
 const gmail = new GmailClient();
-const storage = new DropboxStorage();
+const clouds = { dropbox: new DropboxStorage(), gdrive: new GoogleDriveStorage() };
 const accounting = new MorningAccounting({ mailer: (...a) => gmail.sendMailWithAttachment(...a) });
 const getContext = () => {
   if (!getSecret('gmail_refresh')) throw new Error('gmail not connected');
-  if (!getSecret('dropbox_refresh')) throw new Error('dropbox not connected');
   const settings = getSettings();
+  if (!getSecret(STORAGE_SECRET[settings.storageProvider])) throw new Error(`${settings.storageProvider} not connected`);
   return {
     gmail,
-    deps: { storage, accounting, ai: getAiProvider(settings), settings, now: () => new Date() },
+    deps: { storage: storageFor(clouds, settings), accounting, ai: getAiProvider(settings), settings, now: () => new Date() },
   };
 };
 const worker = startWorker(getContext);

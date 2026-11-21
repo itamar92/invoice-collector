@@ -4,6 +4,7 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, TelegramSection } from '../components/SettingsSections.js';
 import { ButtonLink, Card, Notice, PageTitle, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
+import { connectedName } from '../Layout.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const SECTIONS: { id: string; key: MessageKey; body: () => ReactNode }[] = [
@@ -56,7 +57,7 @@ export default function Settings() {
   return (
     <div className="space-y-4">
       <PageTitle actions={<ButtonLink to="/setup" variant="ghost">{t('settings.setup')}</ButtonLink>}>{t('settings.title')}</PageTitle>
-      {connected && <Notice tone="ok">{t('setup.connectedToast', { name: connected === 'google' ? t('conn.gmail') : t('conn.dropbox') })}</Notice>}
+      {connected && <Notice tone="ok">{t('setup.connectedToast', { name: connectedName(connected) })}</Notice>}
 
       {/* Section menu: stays under the phone header / at the top on desktop; scrolls sideways on a phone. */}
       <nav aria-label={t('settings.menu')} className="sticky top-14 z-10 -mx-4 bg-ground/95 px-4 py-2 backdrop-blur md:top-0 md:-mx-2 md:px-2">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api.js';
+import type { StorageProvider } from '../api.js';
 import { t } from '../i18n/he.js';
 import { Button, ErrorText, hintCls, Icon, inputCls, Loading, Notice, rowCls, useAction } from './ui.js';
 
@@ -8,10 +9,11 @@ const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
 const clean = (p: string) => p.trim().replace(/\/{2,}/g, '/').replace(/\/$/, '');
 
 /**
- * Browses the Dropbox one folder at a time and hands back the chosen path. Starts where `value` points when that
- * folder exists, else at the top. A new folder name only extends the path: Dropbox creates it on the first filing.
+ * Browses the chosen cloud (Dropbox or Google Drive) one folder at a time and hands back the chosen path. Starts
+ * where `value` points when that folder exists, else at the top.
  */
-export function FolderPicker({ value, onPick, onClose }: { value: string; onPick: (path: string) => void; onClose: () => void }) {
+export function FolderPicker({ value, provider, onPick, onClose }:
+  { value: string; provider: StorageProvider; onPick: (path: string) => void; onClose: () => void }) {
   const [path, setPath] = useState(clean(value));
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +25,7 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
   useEffect(() => {
     let live = true;
     setFolders(null); setError(null);
-    api.dropboxFolders(path).then(
+    api.storageFolders(path).then(
       (r) => { if (live) setFolders(r.folders); },
       (e: unknown) => {
         if (!live) return;
@@ -35,13 +37,14 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
     return () => { live = false; };
   }, [path]);
 
+  const top = provider === 'gdrive' ? t('folders.top.gdrive') : t('folders.top');
   const crumbs = path.split('/').filter(Boolean);
   const newClean = newName.trim();
   const newBad = /[\\/:*?"<>|]/.test(newClean) || newClean === '.' || newClean === '..' || /[. ]$/.test(newClean);
   const pick = (p: string) => { onPick(p); onClose(); };
-  /** Creates the folder in Dropbox now and opens it, so it can be picked (or a subfolder made in it). */
+  /** Creates the folder in the cloud now and opens it, so it can be picked (or a subfolder made in it). */
   const create = () => make.run(async () => {
-    const r = await api.createDropboxFolder(path, newClean);
+    const r = await api.createStorageFolder(path, newClean);
     setNewName(''); setCreated(r.folder.name); setMissingStart(null);
     setPath(r.folder.path);
   });
@@ -54,7 +57,7 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
 
       {/* Where we are: every level is a step back up. */}
       <nav aria-label={t('folders.browse')} className="flex flex-wrap items-center gap-1 text-sm">
-        <button type="button" onClick={() => setPath('')} className="min-h-8 rounded-lg px-1.5 font-semibold text-accent hover:bg-accent-tint">{t('folders.top')}</button>
+        <button type="button" onClick={() => setPath('')} className="min-h-8 rounded-lg px-1.5 font-semibold text-accent hover:bg-accent-tint">{top}</button>
         {crumbs.map((c, i) => {
           const to = `/${crumbs.slice(0, i + 1).join('/')}`;
           const last = i === crumbs.length - 1;
@@ -92,7 +95,7 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
           )}
       </div>
 
-      {path === '' && <Notice>{t('folders.appFolderHint')}</Notice>}
+      {path === '' && provider === 'dropbox' && <Notice>{t('folders.appFolderHint')}</Notice>}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={!!error && path !== ''} onClick={() => pick(path)}>
@@ -110,7 +113,7 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
             <Icon name="folder" />{t('folders.create')}
           </Button>
         </form>
-        <p className={hintCls}>{newBad ? t('folders.badName') : t('folders.newHint', { where: path || t('folders.top') })}</p>
+        <p className={hintCls}>{newBad ? t('folders.badName') : t('folders.newHint', { where: path || top })}</p>
         <ErrorText>{make.error}</ErrorText>
       </div>
     </div>

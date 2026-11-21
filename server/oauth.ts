@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { requireUser } from './auth.js';
+import { DRIVE_SCOPE } from './destinations/gdrive.js';
+import { chooseStorage } from './destinations/storage.js';
 import { setSecret } from './secrets.js';
 import { updateSettings } from './settings.js';
 
 const TTL_MS = 10 * 60 * 1000;
-interface Pending { verifier: string; expires: number; provider: 'dropbox' | 'google' }
+interface Pending { verifier: string; expires: number; provider: 'dropbox' | 'google' | 'gdrive' }
 const pending = new Map<string, Pending>(); // single process
 
 const b64url = (b: Buffer) => b.toString('base64url');
@@ -58,6 +60,7 @@ export function oauthRouter(): express.Router {
       });
       const body = await tr.json().catch(() => ({})) as { refresh_token?: string };
       if (!tr.ok || !body.refresh_token) { res.status(502).json({ error: 'token_exchange_failed' }); return; }
+      chooseStorage('dropbox'); // only one cloud at a time: this disconnects Google Drive
       setSecret('dropbox_refresh', body.refresh_token);
       res.redirect('/settings?connected=dropbox');
     } catch {
@@ -65,7 +68,8 @@ export function oauthRouter(): express.Router {
     }
   });
 
-  r.get('/api/oauth/google/start', requireUser, (req, res) => {
+  /** Gmail and Google Drive share the Google client and its one registered redirect URI, but not a token. */
+  const googleStart = (provider: 'google' | 'gdrive', scopes: string[], res: express.Response) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId || !process.env.GOOGLE_CLIENT_SECRET || !process.env.PUBLIC_URL) {
       res.status(500).json({ error: 'google_not_configured' }); return;
@@ -74,9 +78,7 @@ export function oauthRouter(): express.Router {
     for (const [k, v] of pending) if (v.expires <= now) pending.delete(k);
     const verifier = b64url(crypto.randomBytes(48));
     const state = b64url(crypto.randomBytes(24));
-    pending.set(state, { verifier, expires: now + TTL_MS, provider: 'google' });
-    const scopes = [GMAIL_MODIFY];
-    if (req.query.send === '1') scopes.push(GMAIL_SEND);
+    pending.set(state, { verifier, expires: now + TTL_MS, provider });
     const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     u.search = new URLSearchParams({
       client_id: clientId,
@@ -87,18 +89,27 @@ export function oauthRouter(): express.Router {
       code_challenge_method: 'S256',
       access_type: 'offline',
       prompt: 'consent',
-      include_granted_scopes: 'true',
+      // Gmail's grant grows (send is added later); Drive's token stays Drive-only.
+      ...(provider === 'google' ? { include_granted_scopes: 'true' } : {}),
       state,
     }).toString();
     res.redirect(u.toString());
+  };
+
+  r.get('/api/oauth/google/start', requireUser, (req, res) => {
+    const scopes = [GMAIL_MODIFY];
+    if (req.query.send === '1') scopes.push(GMAIL_SEND);
+    googleStart('google', scopes, res);
   });
+
+  r.get('/api/oauth/gdrive/start', requireUser, (_req, res) => { googleStart('gdrive', [DRIVE_SCOPE], res); });
 
   r.get('/api/oauth/google/callback', requireUser, async (req, res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : '';
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const p = pending.get(state);
     pending.delete(state); // one-time use
-    if (!p || p.provider !== 'google' || p.expires <= Date.now() || !code) {
+    if (!p || (p.provider !== 'google' && p.provider !== 'gdrive') || p.expires <= Date.now() || !code) {
       res.status(400).json({ error: 'invalid_state' }); return;
     }
     try {
@@ -113,6 +124,12 @@ export function oauthRouter(): express.Router {
       });
       const body = await tr.json().catch(() => ({})) as { refresh_token?: string; scope?: string };
       if (!tr.ok || !body.refresh_token) { res.status(502).json({ error: 'token_exchange_failed' }); return; }
+      if (p.provider === 'gdrive') {
+        chooseStorage('gdrive'); // only one cloud at a time: this disconnects Dropbox
+        setSecret('gdrive_refresh', body.refresh_token);
+        res.redirect('/settings?connected=gdrive');
+        return;
+      }
       setSecret('gmail_refresh', body.refresh_token);
       updateSettings({ gmailScopes: (body.scope ?? '').split(/\s+/).filter(Boolean) });
       res.redirect('/settings?connected=google');

@@ -1,10 +1,10 @@
 import type { ExtractedFields, ItemState, Reason } from '../server/core/types.js';
-import type { Category, Settings } from '../server/settings.js';
+import type { Category, Settings, StorageProvider } from '../server/settings.js';
 import type { SecretKey } from '../server/secrets.js';
 import type { Stats } from '../server/stats.js';
 import { tDyn } from './i18n/he.js';
 
-export type { Category, ExtractedFields, ItemState, Reason, SecretKey, Settings, Stats };
+export type { Category, StorageProvider, ExtractedFields, ItemState, Reason, SecretKey, Settings, Stats };
 
 export interface Summary {
   attention: number; awaitingVendor: number; awaitingBackfillApproval: number; waitingAi: number; worthALook: number; missedOpen: number;
@@ -174,11 +174,11 @@ export const api = {
   testAi: () => send<{ ok: boolean; provider: string; error?: string }>('POST', '/api/ai/test'),
   detectMorning: () => send<{ modes: MorningModes; verified: false }>('POST', '/api/morning/detect'),
   morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),
-  /** Subfolders of a Dropbox path ('' = the top). 404 folder_not_found when it does not exist. */
-  dropboxFolders: (path: string) => get<{ path: string; folders: { name: string; path: string }[] }>(`/api/dropbox/folders?path=${enc(path)}`),
-  /** Creates a folder in Dropbox now; 409 folder_conflict when a file has that name. */
-  createDropboxFolder: (parent: string, name: string) =>
-    send<{ folder: { name: string; path: string } }>('POST', '/api/dropbox/folders', { parent, name }),
+  /** Subfolders of a path in the chosen cloud ('' = the top). 404 folder_not_found when it does not exist. */
+  storageFolders: (path: string) => get<{ path: string; folders: { name: string; path: string }[] }>(`/api/storage/folders?path=${enc(path)}`),
+  /** Creates a folder in the chosen cloud now; 409 folder_conflict when a file has that name. */
+  createStorageFolder: (parent: string, name: string) =>
+    send<{ folder: { name: string; path: string } }>('POST', '/api/storage/folders', { parent, name }),
   gmailLabels: () => get<{ labels: string[] }>('/api/gmail/labels'),
 };
 
@@ -195,3 +195,10 @@ export async function startOAuth(url: string): Promise<void> {
 }
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+
+/** Each cloud's refresh-token secret; only the chosen one is ever connected. */
+export const STORAGE_SECRET = { dropbox: 'dropbox_refresh', gdrive: 'gdrive_refresh' } as const satisfies Record<StorageProvider, SecretKey>;
+/** Whether the chosen cloud is connected. */
+export function storageConnected(s: SettingsResponse): boolean {
+  return s.secrets[STORAGE_SECRET[s.settings.storageProvider]];
+}

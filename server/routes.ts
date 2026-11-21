@@ -23,6 +23,7 @@ import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
 import { detectMorningModes, fetchMorningClassifications, type MorningClassification } from './destinations/morning.js';
+import { chooseStorage } from './destinations/storage.js';
 import { secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
 import { stats } from './stats.js';
 import { sanitizeError, summary, worthSince } from './summary.js';
@@ -37,7 +38,7 @@ import { createUpload, MAX_UPLOAD_BYTES, runUpload, UploadError } from './source
 export { sanitizeError };
 
 export interface ApiContext {
-  /** Real deps + Gmail source; throws when Gmail/Dropbox are not connected yet. */
+  /** Real deps + Gmail source; throws when Gmail or the chosen cloud storage is not connected yet. */
   getDeps: () => { deps: Deps; gmail: GmailSource };
   /** The worker's tick (it has its own mutex). Absent: POST /api/worker/run answers 503. */
   runTick?: () => Promise<void>;
@@ -106,6 +107,7 @@ const SettingsPatch = z.object({
   currencyLabel: z.string().min(1),
   vatRate: z.number().min(0).max(100),
   gmailLabel: z.string().min(1).nullable(),
+  storageProvider: z.enum(['dropbox', 'gdrive']),
   storageRoot: z.string(),
   folderTemplate: z.string().min(1),
   filenameTemplate: z.string().min(1),
@@ -160,7 +162,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
   const clock = ctx.now ?? (() => new Date());
   let morningModes: { api_fields: boolean; api_file: boolean } | null = null;
 
-  /** Deps for routes that act on Gmail/Dropbox; 503 while those are not connected. */
+  /** Deps for routes that act on Gmail/cloud storage; 503 while those are not connected. */
   const live = () => {
     try { return ctx.getDeps(); } catch { throw new HttpError(503, 'not_connected'); }
   };
@@ -461,9 +463,9 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ labels });
   }));
 
-  // ---------- dropbox ----------
+  // ---------- cloud storage (Dropbox or Google Drive, whichever is chosen) ----------
   // Folder browser for the storage root: read-only, one level at a time.
-  r.get('/dropbox/folders', wrap(async (req, res) => {
+  r.get('/storage/folders', wrap(async (req, res) => {
     const { path } = parse(z.object({ path: z.string().max(1000).default('') }), req.query);
     const { storage } = live().deps;
     if (!storage.listFolders) throw new HttpError(503, 'not_connected');
@@ -471,7 +473,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
       res.json({ path, folders: await storage.listFolders(path) });
     } catch (e) {
       if (e instanceof FolderNotFoundError) throw new HttpError(404, 'folder_not_found');
-      throw new HttpError(502, 'dropbox_unavailable');
+      throw new HttpError(502, 'storage_unavailable');
     }
   }));
 
@@ -480,7 +482,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     parent: z.string().max(1000).default(''),
     name: z.string().trim().min(1).max(255).refine((n) => !/[\\/:*?"<>|]/.test(n) && n !== '.' && n !== '..' && !/[. ]$/.test(n)),
   }).strict();
-  r.post('/dropbox/folders', wrap(async (req, res) => {
+  r.post('/storage/folders', wrap(async (req, res) => {
     const { parent, name } = parse(NewFolder, req.body);
     const { storage } = live().deps;
     if (!storage.createFolder) throw new HttpError(503, 'not_connected');
@@ -489,7 +491,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     } catch (e) {
       if (e instanceof FolderNotFoundError) throw new HttpError(404, 'folder_not_found');
       if (e instanceof FolderConflictError) throw new HttpError(409, 'folder_conflict');
-      throw new HttpError(502, 'dropbox_unavailable');
+      throw new HttpError(502, 'storage_unavailable');
     }
   }));
 
@@ -499,7 +501,9 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
 
   r.put('/settings', wrap((req, res) => {
-    const patch = parse(SettingsPatch, req.body);
+    const { storageProvider, ...patch } = parse(SettingsPatch, req.body);
+    // One cloud at a time: switching disconnects the other (its token is deleted).
+    if (storageProvider !== undefined) chooseStorage(storageProvider);
     // The stored credential belongs to the hub it was issued by: never carry it over to another address.
     if (patch.telegramRelayUrl !== undefined && patch.telegramRelayUrl !== getSettings().telegramRelayUrl) {
       setSecret('telegram_relay_auth', null);

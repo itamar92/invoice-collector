@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigationType } from 'react-router-dom';
-import { api, GMAIL_SEND_SCOPE } from './api.js';
+import { api, GMAIL_SEND_SCOPE, storageConnected } from './api.js';
 import type { SettingsResponse } from './api.js';
 import { AiThinking, Button, CountBadge, ErrorText, fmtDateTime, Icon, LoadingBar, Notice, takeFlash, useAction, useApp } from './components/ui.js';
 import { useUploadReceipt } from './components/UploadReceipt.js';
@@ -13,13 +13,18 @@ import type { MessageKey } from './i18n/he.js';
 export function connectionProblems(s: SettingsResponse): string[] {
   const out: string[] = [];
   if (!s.secrets.gmail_refresh) out.push(t('conn.gmail'));
-  if (!s.secrets.dropbox_refresh) out.push(t('conn.dropbox'));
+  if (!storageConnected(s)) out.push(t(s.settings.storageProvider === 'gdrive' ? 'conn.gdrive' : 'conn.dropbox'));
   const m = s.settings.morning;
   const morningOk = m.mode === 'email'
     ? !!m.inboxEmail && s.settings.gmailScopes.includes(GMAIL_SEND_SCOPE)
     : m.mode !== null && s.secrets.morning_id && s.secrets.morning_secret;
   if (!morningOk) out.push(t('conn.morning'));
   return out;
+}
+
+/** The `?connected=` value an OAuth callback sends back, as the service's name. */
+export function connectedName(connected: string): string {
+  return connected === 'google' ? t('conn.gmail') : connected === 'gdrive' ? t('conn.gdrive') : t('conn.dropbox');
 }
 
 type NavItem = { to: string; key: MessageKey; icon: IconName; count?: 'attention' | 'missedOpen' };
