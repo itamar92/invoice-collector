@@ -16,20 +16,42 @@
       "kind": "const",
       "value": "פרטנר תקשורת בע\"מ"
     },
+    "vendorTaxId": {
+      "kind": "const",
+      "value": "557604147"
+    },
     "docType": {
       "kind": "const",
       "value": "tax_invoice_receipt"
     },
+    "docNumber": {
+      "kind": "regex",
+      "pattern": "מס' חשבון תקופתי:\\s*(\\d{6,})",
+      "parse": "text"
+    },
     "issueDate": {
       "kind": "regex",
-      "pattern": "(\\d{2}/\\d{2}/\\d{2})",
+      "pattern": "תאריך עריכת חשבון:\\s*(\\d{2}/\\d{2}/\\d{2})",
       "parse": "date",
       "dateFormat": "DD/MM/YY"
     },
     "total": {
       "kind": "regex",
-      "pattern": "(\\d+(?:[,.]\\d+)*)\\s*\\{",
-      "parse": "amount"
+      "pattern": "סה\"כ כולל מע\"מ\\s*:\\s*(\\d+\\s*\\.\\s*-?[\\d,]+)",
+      "parse": "amount",
+      "mirrored": true
+    },
+    "vat": {
+      "kind": "regex",
+      "pattern": "\\|\\s*מע\"מ\\s*:\\s*(\\d+\\s*\\.\\s*-?[\\d,]+)",
+      "parse": "amount",
+      "mirrored": true
+    },
+    "net": {
+      "kind": "regex",
+      "pattern": "סה\"כ לפני מע\"מ\\s*:\\s*(\\d+\\s*\\.\\s*-?[\\d,]+)",
+      "parse": "amount",
+      "mirrored": true
     }
   },
   "description": "חשבון אינטרנט חודש {issueMonth}"

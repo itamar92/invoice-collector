@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { RecipeSchema, compileRecipe, matchesRecipe, runRecipe, RecipeError } from '../server/core/recipe.js';
+import { RecipeSchema, checkRecipe, compileRecipe, describeCheck, matchesRecipe, runRecipe, RecipeError } from '../server/core/recipe.js';
 
 const text = readFileSync(new URL('./fixtures/synthetic-phone-bill.txt', import.meta.url), 'utf8');
 
@@ -96,4 +96,31 @@ test('match must have at least one sender or marker', () => {
     assert.throws(() => compileRecipe({ ...valid, match }), RecipeError);
     assert.equal(RecipeSchema.safeParse({ ...valid, match }).success, false);
   }
+});
+
+test('mirrored amounts: read right to left, only allowed with parse amount', () => {
+  const r = compileRecipe({ ...valid, fields: {
+    total: { kind: 'regex', pattern: 'סה"כ:\\s*(\\d+ \\. [\\d,]+)', parse: 'amount', mirrored: true },
+  } });
+  assert.equal(runRecipe(r, 'סה"כ: 99 . 88 {').total, 88.99);
+  assert.throws(() => compileRecipe({ ...valid, fields: {
+    docNumber: { kind: 'regex', pattern: '(\\d+)', parse: 'text', mirrored: true },
+  } }), RecipeError);
+});
+
+test('checkRecipe reports each field next to the expected value', () => {
+  const r = compileRecipe(valid);
+  const expected = runRecipe(r, text);
+  const ok = checkRecipe(r, text, expected);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.fields.map((f) => f.field), ['issueDate', 'total', 'docNumber', 'vat']); // net: no rule, no value
+
+  const miss = checkRecipe(r, text, { ...expected, total: 60, net: 50 });
+  assert.equal(miss.ok, false);
+  assert.deepEqual(miss.fields.find((f) => f.field === 'total'), { field: 'total', expected: 60, got: 59.9, required: true, ok: false });
+  assert.equal(miss.fields.find((f) => f.field === 'net')?.required, false);
+  assert.match(describeCheck(miss), /total: expected 60, the recipe read 59.9/);
+
+  // An optional field alone never fails the check.
+  assert.equal(checkRecipe(r, text, { ...expected, docNumber: 'other' }).ok, true);
 });

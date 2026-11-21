@@ -1,5 +1,5 @@
 import type { ZodType } from 'zod';
-import { compileRecipe, runRecipe, unsafeAiMatch, type Recipe } from '../core/recipe.js';
+import { checkRecipe, compileRecipe, describeCheck, unsafeAiMatch, type Recipe } from '../core/recipe.js';
 import type { ExtractedFields } from '../core/types.js';
 import { getSecret, type SecretKey } from '../secrets.js';
 import type { Settings } from '../settings.js';
@@ -183,8 +183,7 @@ export function aiExtract(
 
 /** The recipe reads the same date and total from the text as the given (correct) fields. */
 export function reproduces(r: Recipe, text: string, f: ExtractedFields): boolean {
-  const got = runRecipe(r, text);
-  return got.issueDate === f.issueDate && got.total === f.total;
+  return checkRecipe(r, text, f).ok;
 }
 
 /**
@@ -208,15 +207,20 @@ export async function aiWriteRecipe(
     return r;
   };
   let previous = input.previous;
+  // What the current recipe reads wrong on this document, so the AI starts from the actual mistake.
+  const before = previous && checkRecipe(previous, input.text, input.fields);
+  let misses = before && !before.ok ? describeCheck(before) : undefined;
   let last: Recipe | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const recipe = await askValidated(p, {
       system: RECIPE_SYSTEM,
-      user: recipeUserPrompt({ ...input, previous }),
+      user: recipeUserPrompt({ ...input, previous, misses }),
     }, validate, tag);
     last = recipe;
-    if (reproduces(recipe, input.text, input.fields)) return recipe;
+    const check = checkRecipe(recipe, input.text, input.fields);
+    if (check.ok) return recipe;
     previous = recipe;
+    misses = describeCheck(check);
   }
   return { ...(last as Recipe), aiAlways: true };
 }

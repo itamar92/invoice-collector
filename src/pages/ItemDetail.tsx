@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import type { ExtractedFields, ItemState, Reason, Reapplied } from '../api.js';
+import type { ExtractedFields, ItemState, Reason, Reapplied, RecipeCheck } from '../api.js';
+import { RecipeCheckView } from '../components/RecipeCheck.js';
 import {
   AiThinking, Button, Card, ErrorText, Field, fmtDateTime, hintCls, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
   setFlash, StateBadge, stateLabel, usageText, useAction, useApp, useLoad,
@@ -251,7 +252,7 @@ function RecipeFromFix({ canSave, dirty, disabled, saveFirst, onRecipeSaved }: {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
   const [draft, setDraft] = useState<{
-    vendorKey: string; recipe: Record<string, unknown>; reproduces: boolean; usage: Parameters<typeof usageText>[0];
+    vendorKey: string; recipe: Record<string, unknown>; reproduces: boolean; check: RecipeCheck; text: string; usage: Parameters<typeof usageText>[0];
   } | null>(null);
   const [savedRecipe, setSavedRecipe] = useState<Reapplied | null>(null);
   const act = useAction();
@@ -304,6 +305,7 @@ function RecipeFromFix({ canSave, dirty, disabled, saveFirst, onRecipeSaved }: {
       {draft && (
         <div className="space-y-2">
           <Notice tone={draft.reproduces ? 'ok' : 'warn'}>{draft.reproduces ? t('item.recipeFix.ok') : t('item.recipeFix.miss')}</Notice>
+          <RecipeCheckView check={draft.check} text={draft.text} />
           <p className="num text-xs text-muted">{t('vendors.regen.usage', { line: usageText(draft.usage) })}</p>
           <details className="text-xs">
             <summary className="cursor-pointer font-semibold text-accent">{t('item.recipeFix.show')}</summary>

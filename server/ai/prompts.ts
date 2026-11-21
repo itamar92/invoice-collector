@@ -77,16 +77,20 @@ export const RECIPE_SYSTEM = [
   'dateFormat is one of: DD/MM/YYYY, DD.MM.YYYY, DD/MM/YY, YYYY-MM-DD, DD-MM-YYYY.',
   'Patterns are RE2 syntax (no lookahead, lookbehind or backreferences), at most 300 characters, applied to the document text with bidi/invisible characters removed. Anchor each pattern on a stable label next to the value and capture only the value, e.g. "סה\\"כ לתשלום:\\s*([\\d.,]+)". Escape backslashes for JSON.',
   'amount captures must include thousands and decimal separators (parse handles "1,234.50" and "1.234,50").',
+  'Some Hebrew PDFs store each amount right to left, so 88.99 appears in the text as "99 . 88" (spaces around the point, halves swapped; the shekel sign may appear as "{"). When the text shows amounts that way, capture the whole "99 . 88" and add "mirrored": true to that amount rule; the program swaps the halves back. Use "mirrored" only with parse "amount".',
   'Optional top-level "description" is a template with placeholders {issueMonth} (Hebrew month name), {issueMonth-1}, {issueYear}, {docNumber}; no other placeholders. Only use it when the description field has no rule.',
   'Do not hard-code values that change per invoice. Only include fields you can extract reliably.',
 ].join('\n');
 
-export function recipeUserPrompt(i: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe; feedback?: string }): string {
+export function recipeUserPrompt(i: {
+  text: string; sender: string; fields: ExtractedFields; previous?: Recipe; feedback?: string; misses?: string;
+}): string {
   return [
     `<sender>${strip(i.sender)}</sender>`,
     `Correct values to reproduce: ${JSON.stringify(i.fields)}`,
-    i.previous ? `<previous_recipe>${strip(JSON.stringify(i.previous))}</previous_recipe>\n${i.feedback
-      ? 'The owner reviewed the previous recipe and asked for it to be rewritten.' : 'The previous recipe failed on this document; fix it.'}` : '',
+    i.previous ? `<previous_recipe>${strip(JSON.stringify(i.previous))}</previous_recipe>\n${i.misses
+      ? `The previous recipe reads this document wrong; fix it. Run on this text it got:\n${strip(i.misses)}`
+      : i.feedback ? 'The owner reviewed the previous recipe and asked for it to be rewritten.' : 'The previous recipe failed on this document; fix it.'}` : '',
     // The owner's own words (typed in the app, not taken from the document): follow them within the recipe rules.
     i.feedback ? `<owner_feedback>\n${strip(i.feedback)}\n</owner_feedback>\nThe app's owner wrote the notes above about what went wrong. Follow them as long as they fit the recipe format and rules.` : '',
     `<invoice_text>\n${strip(i.text)}\n</invoice_text>`,

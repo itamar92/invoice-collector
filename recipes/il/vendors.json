@@ -1,77 +1,77 @@
 {
   "hot-mobile": {
     "displayName": "הוט מובייל",
-    "defaultCategory": "טלפון"
+    "defaultCategory": "הוצאות טלפון נייד"
   },
   "partner": {
     "displayName": "פרטנר",
-    "defaultCategory": "אינטרנט"
+    "defaultCategory": "הוצאות דואר ותקשורת"
   },
   "iec-hashmal": {
     "displayName": "חברת החשמל",
-    "defaultCategory": "חשבון חשמל"
+    "defaultCategory": "חשמל - פרטי ועסקי"
   },
   "delek-ocr": {
     "displayName": "מנטה קמעונאות דרכים (דלק)",
-    "defaultCategory": "דלק"
+    "defaultCategory": "רכב - דלק"
   },
   "arnona-hod-hasharon": {
     "displayName": "עיריית הוד השרון",
-    "defaultCategory": "ארנונה"
+    "defaultCategory": "ארנונה - פרטי ועסקי"
   },
   "akum": {
     "displayName": "אקו\"ם",
-    "defaultCategory": "קבלנות משנה"
+    "defaultCategory": "עבודות חוץ וקבלני משנה"
   },
   "carrefour": {
     "displayName": "קרפור",
-    "defaultCategory": "כיבודים ואוכל"
+    "defaultCategory": "כיבודים"
   },
   "heichal-hatarbut": {
     "displayName": "היכל התרבות",
-    "defaultCategory": "קבלנות משנה"
+    "defaultCategory": "עבודות חוץ וקבלני משנה"
   },
   "liveplay": {
     "displayName": "לייב פליי",
-    "defaultCategory": "קבלנות משנה"
+    "defaultCategory": "עבודות חוץ וקבלני משנה"
   },
   "tzmigei-shabtai": {
     "displayName": "צמיגי שבתאי",
-    "defaultCategory": "תחזוקה רכב"
+    "defaultCategory": "רכב - אחזקה ותיקונים (ללא דלק)"
   },
   "bug-holland": {
     "displayName": "באג הולנדיטסנטר",
-    "defaultCategory": "אחזקה ותיקונים"
+    "defaultCategory": "הוצאות אחזקה ותיקונים"
   },
   "ginzburg-music": {
     "displayName": "גינזבורג מוסיקה",
-    "defaultCategory": "אחזקה ותיקונים"
+    "defaultCategory": "הוצאות אחזקה ותיקונים"
   },
   "kvish6": {
     "displayName": "כביש 6"
   },
   "or-habarak": {
     "displayName": "מוסך אור הברק",
-    "defaultCategory": "תחזוקה רכב"
+    "defaultCategory": "רכב - אחזקה ותיקונים (ללא דלק)"
   },
   "eni-mobile": {
     "displayName": "אני מובייל",
-    "defaultCategory": "דלק"
+    "defaultCategory": "רכב - דלק"
   },
   "morning": {
     "displayName": "Morning",
-    "defaultCategory": "קבלנות משנה"
+    "defaultCategory": "עבודות חוץ וקבלני משנה"
   },
   "10ten": {
     "displayName": "טן חברה לדלק",
-    "defaultCategory": "דלק"
+    "defaultCategory": "רכב - דלק"
   },
   "meta-ads": {
     "displayName": "Meta Platforms",
-    "defaultCategory": "קידום ופרסום"
+    "defaultCategory": "פרסום וקידום מכירות"
   },
   "cloudflare": {
     "displayName": "Cloudflare",
-    "defaultCategory": "תוכנות"
+    "defaultCategory": "תוכנה"
   }
 }

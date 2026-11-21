@@ -1,7 +1,7 @@
 import express from 'express';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { z, ZodError } from 'zod';
-import { AiOutputError, AiUnavailableError, aiWriteRecipe, getAiProvider, reproduces } from './ai/provider.js';
+import { AiOutputError, AiUnavailableError, aiWriteRecipe, getAiProvider } from './ai/provider.js';
 import type { AiProvider } from './ai/provider.js';
 import { emptyTotals, itemUsage, usageSummary } from './ai/usage.js';
 import { requireUser } from './auth.js';
@@ -14,7 +14,7 @@ import {
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
 import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
-import { compileRecipe, RecipeError } from './core/recipe.js';
+import { checkRecipe, compileRecipe, RecipeError } from './core/recipe.js';
 import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
@@ -387,6 +387,20 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ ok: true, id, reapplied: reapplyVendorRecipe(key, getSettings(), clock()) });
   }));
 
+  // The owner tries a recipe (saved or not) on one of the vendor's documents: what it reads, field by field,
+  // next to the document's values. No AI, nothing saved.
+  const TryRecipe = z.object({ itemId: z.string().min(1), recipe: z.unknown() }).strict();
+  r.post('/vendors/:key/recipe/test', wrap((req, res) => {
+    const key = param(req, 'key');
+    const { itemId, recipe: raw } = parse(TryRecipe, req.body);
+    if (!getVendor(key)) throw notFound('vendor');
+    const item = getItem(itemId);
+    if (!item || item.vendorKey !== key) throw notFound('item');
+    if (!item.text?.trim() || !item.fields) throw new HttpError(409, 'item_not_readable');
+    const recipe = compileRecipe(raw); // throws RecipeError -> 400 with its message
+    res.json({ check: checkRecipe(recipe, item.text, item.fields), text: item.text });
+  }));
+
   // The AI rewrites the vendor's recipe from one of its documents, guided by the owner's notes. Nothing is
   // saved: the draft goes back to the editor, and the owner saves it (or not) like a hand-edited recipe.
   const Regenerate = z.object({ itemId: z.string().min(1), comment: z.string().trim().max(2000).default('') }).strict();
@@ -420,7 +434,8 @@ export function apiRouter(ctx: ApiContext): express.Router {
       ...rest, vendorKey: key, displayName: previous?.displayName ?? vendor.displayName,
       ...(previous?.aiAlways ? { aiAlways: true } : {}),
     });
-    res.json({ recipe, reproduces: reproduces(recipe, item.text, item.fields), usage });
+    const check = checkRecipe(recipe, item.text, item.fields);
+    res.json({ recipe, reproduces: check.ok, check, text: item.text, usage });
   }));
 
   r.put('/vendors/:key/ai-always', wrap((req, res) => {

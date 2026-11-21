@@ -38,8 +38,6 @@ Sources: `S` = account-manager `.claude/skills/invoice-expert/vendor-parsers/*.j
 - **meta-ads**: dates are English ("Mar 5, 2026"), which the recipe date formats do not support.
 - **cloudflare**: dates are English ("March 5, 2026") and the invoice is in USD, which the recipe date formats do not support.
 
-## Category mapping (source category to Settings category)
+## Categories
 
-חשמל ומים to חשבון חשמל, ארנונה וועד בית to ארנונה, קבלני משנה to קבלנות משנה, רכב - דלק to דלק,
-רכב - אחזקה תיקונים וחניה to תחזוקה רכב, כלי עבודה ציוד ואחזקה to אחזקה ותיקונים, כיבודים to כיבודים ואוכל,
-פרסום to קידום ופרסום, תוכנה to תוכנות, סלולרי to טלפון. Partner keeps אינטרנט (its parser describes the document as an internet bill).
+Each `defaultCategory` in vendors.json is one of the Settings categories in `server/defaults/il.ts`, by its exact name.

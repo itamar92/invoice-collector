@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAmount, parseDate, parseDocType, hebrewMonthName } from '../server/core/parse.js';
+import { parseAmount, parseDate, parseDocType, hebrewMonthName, unmirrorAmount } from '../server/core/parse.js';
 
 test('parseAmount handles separators, currency markers and signs', () => {
   assert.equal(parseAmount('1,234.50'), 1234.5);
@@ -120,4 +120,12 @@ test('parseDocType: "חשבונית מס זיכוי" and "חשבונית מס/ז
   assert.equal(parseDocType('חשבונית מס/זיכוי'), 'credit_note');
   assert.equal(parseDocType('חשבונית מס - זיכוי'), 'credit_note');
   assert.equal(parseDocType('חשבונית מס'), 'tax_invoice');
+});
+
+test('unmirrorAmount swaps the halves of a right-to-left amount', () => {
+  assert.equal(parseAmount(unmirrorAmount('99 . 88')), 88.99);
+  assert.equal(parseAmount(unmirrorAmount('90 . 1,049')), 1049.9);
+  assert.equal(parseAmount(unmirrorAmount('01 . -10')), -10.01);
+  assert.equal(parseAmount(unmirrorAmount('99.88 ₪')), 88.99);
+  assert.equal(unmirrorAmount('79'), '79'); // no point: left as it is
 });

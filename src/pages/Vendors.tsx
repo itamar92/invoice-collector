@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
-import type { AiUsageTotals, Item, Reapplied, RecipeVersion, Vendor, VendorStatus } from '../api.js';
+import type { AiUsageTotals, Item, Reapplied, RecipeCheck, RecipeVersion, Vendor, VendorStatus } from '../api.js';
+import { RecipeCheckView } from '../components/RecipeCheck.js';
 import {
   AiThinking, Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, usageText, useAction, useApp, useLoad,
 } from '../components/ui.js';
@@ -16,19 +17,27 @@ const docLabel = (i: Item) => `${fmtDate(i.fields?.issueDate ?? i.createdAt)} ·
  * Sends one of the vendor's documents and the owner's notes to the AI, which writes a new recipe. The draft lands
  * in the editor below; nothing is saved until the owner presses save.
  */
-function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json: string) => void }) {
-  const docs = useLoad(() => api.items({ vendor: vendor.key, limit: 50 }), [vendor.key]);
+type Docs = ReturnType<typeof useVendorDocs>;
+type Checked = { check: RecipeCheck; text: string };
+
+/** The vendor's documents a recipe can be written from or tried on, and the one picked. */
+function useVendorDocs(key: string) {
+  const docs = useLoad(() => api.items({ vendor: key, limit: 50 }), [key]);
   const usable = (docs.data?.items ?? []).filter((i) => i.fields && i.hasText);
   const [itemId, setItemId] = useState('');
+  return { loading: docs.loading && !docs.data, usable, chosen: itemId || usable[0]?.id || '', choose: setItemId };
+}
+
+function RegenerateRecipe({ vendor, docs, onDraft }: { vendor: Vendor; docs: Docs; onDraft: (json: string, checked: Checked) => void }) {
+  const { usable, chosen } = docs;
   const [comment, setComment] = useState('');
   const [result, setResult] = useState<{ ok: boolean; usage: AiUsageTotals } | null>(null);
   const act = useAction();
-  const chosen = itemId || usable[0]?.id || '';
 
   const run = () => act.run(async () => {
     setResult(null);
     const r = await api.regenerateRecipe(vendor.key, chosen, comment);
-    onDraft(JSON.stringify(r.recipe, null, 2));
+    onDraft(JSON.stringify(r.recipe, null, 2), { check: r.check, text: r.text });
     setResult({ ok: r.reproduces, usage: r.usage });
   });
 
@@ -36,12 +45,12 @@ function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json:
     <div className="space-y-2 rounded-xl border border-line bg-white p-3">
       <div className="text-sm font-semibold">{t('vendors.regen.title')}</div>
       <p className={hintCls}>{t('vendors.regen.hint')}</p>
-      {docs.loading && !docs.data ? <Loading /> : usable.length === 0 ? <p className="text-sm text-muted">{t('vendors.regen.noDocs')}</p> : (
+      {docs.loading ? <Loading /> : usable.length === 0 ? <p className="text-sm text-muted">{t('vendors.regen.noDocs')}</p> : (
         <>
           <label className="block text-xs">
             <span className="mb-0.5 block font-semibold text-muted">{t('vendors.regen.doc')}</span>
             <div className="flex items-center gap-2">
-              <select className={inputCls} value={chosen} onChange={(e) => setItemId(e.target.value)}>
+              <select className={inputCls} value={chosen} onChange={(e) => docs.choose(e.target.value)}>
                 {usable.map((i) => <option key={i.id} value={i.id}>{docLabel(i)}</option>)}
               </select>
               <Link to={`/items/${chosen}`} className="shrink-0 text-sm font-semibold text-accent underline">{t('vendors.regen.open')}</Link>
@@ -72,6 +81,8 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
   const act = useAction();
   const [saved, setSaved] = useState(false);
   const [reapplied, setReapplied] = useState<Reapplied | null>(null);
+  const [checked, setChecked] = useState<Checked | null>(null);
+  const docs = useVendorDocs(vendor.key);
   const { refreshSummary } = useApp();
   const value = text ?? (latest ? JSON.stringify(latest.recipe, null, 2) : '');
 
@@ -81,6 +92,12 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
     const r = await api.saveRecipe(vendor.key, parsed);
     setText(null); setSaved(true); setReapplied(r.reapplied); await history.reload(); await refreshSummary();
   });
+  // Tries what is in the editor (saved or not) on the picked document; nothing is saved.
+  const test = () => act.run(async () => {
+    let parsed: unknown;
+    try { parsed = JSON.parse(value); } catch { throw new Error(t('vendors.invalidJson')); }
+    setChecked(await api.testRecipe(vendor.key, docs.chosen, parsed));
+  }, 'test');
   const toggleAi = (v: boolean) => act.run(async () => {
     const r = await api.setAiAlways(vendor.key, v);
     setSaved(false); setReapplied(r.reapplied.checked > 0 ? r.reapplied : null); await history.reload(); await refreshSummary();
@@ -97,16 +114,25 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
           </label>
         )
         : <p className="text-sm text-muted">{t('vendors.noRecipe')}</p>}
-      <RegenerateRecipe vendor={vendor} onDraft={(json) => { setText(json); setSaved(false); }} />
+      <RegenerateRecipe vendor={vendor} docs={docs} onDraft={(json, c) => { setText(json); setSaved(false); setChecked(c); }} />
       <div>
         <p className={`mb-1 ${hintCls}`}>{t('vendors.recipeHint')}</p>
         <textarea aria-label={t('vendors.recipeHint')} className={`${inputCls} ltr h-64 font-mono text-xs`} spellCheck={false} value={value}
-          onChange={(e) => { setText(e.target.value); setSaved(false); setReapplied(null); }} />
+          onChange={(e) => { setText(e.target.value); setSaved(false); setReapplied(null); setChecked(null); }} />
       </div>
       <div className="flex items-center gap-2">
         <Button disabled={act.busy || !value.trim() || text === null} onClick={save}>{t('vendors.saveRecipe')}</Button>
+        <Button variant="secondary" className="bg-white" loading={act.is('test')} disabled={act.busy || !value.trim() || !docs.chosen} onClick={test}>
+          {t('recipeCheck.run')}
+        </Button>
         <Saved show={saved} />
       </div>
+      {checked && (
+        <div className="space-y-2 rounded-xl border border-line bg-white p-3">
+          <Notice tone={checked.check.ok ? 'ok' : 'warn'}>{checked.check.ok ? t('recipeCheck.ok') : t('recipeCheck.miss')}</Notice>
+          <RecipeCheckView check={checked.check} text={checked.text} />
+        </div>
+      )}
       {reapplied && reapplied.checked > 0 && (
         <Notice tone="ok">{reapplied.updated > 0 ? t('vendors.reapplied', { ...reapplied }) : t('vendors.reappliedSame', { ...reapplied })}</Notice>
       )}

@@ -25,7 +25,7 @@ const NOW = new Date('2026-06-15T09:00:00Z');
 const FIELDS: ExtractedFields = {
   vendorName: 'סופר דמו', vendorTaxId: '510000002', docType: 'tax_invoice_receipt', docNumber: '9001',
   issueDate: '2026-06-14', total: 118, vat: 18, net: 100, currency: 'ILS', allocationNumber: null,
-  description: 'כיבוד', category: 'כיבודים ואוכל',
+  description: 'כיבוד', category: 'כיבודים',
 };
 const ai: AiProvider = { name: 'fake', supportsPdf: true, ping: async () => {}, completeJson: async () => FIELDS };
 const deps = (): Deps => ({
