@@ -11,10 +11,17 @@ import { OpenAiProvider, type OpenAiLike } from './openai.js';
 import { GeminiProvider, type GeminiLike } from './gemini.js';
 import { SshAgentProvider, type SshClientFactory } from './sshAgent.js';
 import { inboxDir } from './inbox.js';
+import { recordAiUsage, type AiUsage, type UsageTag } from './usage.js';
 
-export interface AiRequest { system: string; user: string; pdf?: Buffer }
+export interface AiRequest {
+  system: string; user: string; pdf?: Buffer;
+  /** Called once per reply received (also when the reply turns out unusable: its tokens were spent). */
+  onUsage?: (u: AiUsage | null) => void;
+}
 export interface AiProvider {
   name: string;
+  /** The model asked, for the usage record. */
+  model?: string;
   supportsPdf: boolean;
   /** Attach the PDF only when the document has no text layer (a scan or photo); text goes as text. */
   pdfOnlyForScans?: boolean;
@@ -129,7 +136,10 @@ export function getAiProvider(s: Pick<Settings, 'ai'>, deps: AiDeps = {}): AiPro
 }
 
 /** Asks, validates; on bad JSON/schema retries once with the validation error appended, then AiOutputError. */
-async function askValidated<T>(p: AiProvider, req: AiRequest, validate: (raw: unknown) => T): Promise<T> {
+async function askValidated<T>(p: AiProvider, request: AiRequest, validate: (raw: unknown) => T, tag?: UsageTag): Promise<T> {
+  const req: AiRequest = tag
+    ? { ...request, onUsage: (u) => recordAiUsage(tag, p.name, p.model ?? null, u) }
+    : request;
   let lastError = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     const r = attempt === 0 ? req : {
@@ -159,6 +169,7 @@ function schemaValidator<T>(schema: ZodType<T, any, any>): (raw: unknown) => T {
 export function aiExtract(
   p: AiProvider,
   input: { text: string; pdf?: Buffer; isScan?: boolean; sender: string; categories: string[] },
+  tag: UsageTag = { purpose: 'extract' },
 ): Promise<ExtractedFields> {
   const { isScan, ...rest } = input;
   const pdf = p.supportsPdf && (!p.pdfOnlyForScans || isScan) ? input.pdf : undefined;
@@ -166,6 +177,7 @@ export function aiExtract(
     p,
     { system: EXTRACT_SYSTEM, user: extractUserPrompt({ ...rest, hasPdf: pdf !== undefined }), pdf },
     schemaValidator<ExtractedFields>(ExtractedFieldsSchema),
+    tag,
   );
 }
 
@@ -182,6 +194,7 @@ export function reproduces(r: Recipe, text: string, f: ExtractedFields): boolean
 export async function aiWriteRecipe(
   p: AiProvider,
   input: { text: string; sender: string; fields: ExtractedFields; previous?: Recipe; feedback?: string },
+  tag: UsageTag = { purpose: 'recipe' },
 ): Promise<Recipe> {
   const validate = (raw: unknown): Recipe => {
     let r: Recipe;
@@ -200,7 +213,7 @@ export async function aiWriteRecipe(
     const recipe = await askValidated(p, {
       system: RECIPE_SYSTEM,
       user: recipeUserPrompt({ ...input, previous }),
-    }, validate);
+    }, validate, tag);
     last = recipe;
     if (reproduces(recipe, input.text, input.fields)) return recipe;
     previous = recipe;

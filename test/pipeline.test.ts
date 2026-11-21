@@ -18,7 +18,8 @@ import { AiOutputError, AiUnavailableError, type AiProvider, type AiRequest } fr
 import { EXTRACT_SYSTEM, RECIPE_SYSTEM } from '../server/ai/prompts.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 import { updateSettings } from '../server/settings.js';
-import { processItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
+import { processItem, reapplyVendorRecipe, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
+import { itemUsage, usageSummary } from '../server/ai/usage.js';
 
 // ---------- synthetic documents ----------
 
@@ -375,7 +376,7 @@ test('every suffix up to _20 taken → needs_attention/storage_error', async () 
   assert.equal(st.puts, 0);
 });
 
-test('receipt after a sent invoice → done, stored, accounting not called', async () => {
+test('receipt after a sent invoice → set aside: not filed, not sent', async () => {
   knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
     fields: {
       ...layoutRecipe('acme', 'x').fields,
@@ -391,12 +392,12 @@ test('receipt after a sent invoice → done, stored, accounting not called', asy
 
   const st = fakeStorage();
   const rec = newItem(invoiceText({ kind: 'Receipt', num: '5001', date: '12/06/2026' }));
-  assert.equal(await processItem(rec.id, deps({ storage: st, accounting: acc })), 'done');
+  assert.equal(await processItem(rec.id, deps({ storage: st, accounting: acc })), 'ignored');
   assert.equal(getItem(rec.id)!.fields?.docType, 'receipt');
   assert.equal(acc.calls.length, 1);
-  assert.equal(st.puts, 1);
+  assert.equal(st.puts, 0);
   assert.ok(notes(rec.id).includes(`receipt_for:${inv.id}`));
-  assert.ok(notes(rec.id).includes('receipt_for_sent_invoice'));
+  assert.ok(notes(rec.id).includes(`receipt_of_invoice:${inv.id}`));
 });
 
 test('backfill email → awaiting_backfill_approval; after approval stored, accounting never called', async () => {
@@ -873,4 +874,109 @@ test('no-match AI recipe cannot be merged with a marker-only recipe → existing
   assert.equal(await processItem(b1.id, deps({ ai })), 'done');
   assert.equal(recipeHistory('demo-widgets-ltd').length, 1);
   assert.ok(notes(b1.id).some((n) => n.startsWith('recipe_not_merged')));
+});
+
+// ---------- receipt + separate tax invoice ----------
+
+/** A layout recipe that tells a tax invoice from a receipt (and reads either number). */
+function pairVendor() {
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+    fields: {
+      ...layoutRecipe('acme', 'x').fields,
+      docType: { kind: 'regex', pattern: '^(Tax Invoice|Receipt) ', flags: 'm', parse: 'docType' },
+      docNumber: { kind: 'regex', pattern: '(?:Invoice|Receipt) (\\d+)', parse: 'text' },
+    },
+  });
+}
+
+test('first import: receipt read before its invoice is set aside once the invoice arrives (unfiled)', async () => {
+  pairVendor();
+  const st = fakeStorage();
+  const rec = newItem(invoiceText({ kind: 'Receipt', num: '5001', date: '12/06/2026' }), { mode: 'backfill' });
+  assert.equal(await processItem(rec.id, deps({ storage: st })), 'awaiting_backfill_approval');
+  const inv = newItem(invoiceText({ kind: 'Tax Invoice', num: '1001', date: '05/06/2026' }), { mode: 'backfill' });
+  assert.equal(await processItem(inv.id, deps({ storage: st })), 'awaiting_backfill_approval');
+  assert.equal(getItem(rec.id)!.state, 'ignored');
+  assert.ok(notes(rec.id).includes(`receipt_of_invoice:${inv.id}`));
+  // The invoice takes one receipt only: a second receipt of the same amount stays.
+  const rec2 = newItem(invoiceText({ kind: 'Receipt', num: '5002', date: '14/06/2026' }), { mode: 'backfill' });
+  assert.equal(await processItem(rec2.id, deps({ storage: st })), 'awaiting_backfill_approval');
+});
+
+test('receipt for another amount and no invoice number → filed as usual', async () => {
+  pairVendor();
+  const inv = newItem(invoiceText({ kind: 'Tax Invoice', num: '1001' }));
+  assert.equal(await processItem(inv.id, deps()), 'done');
+  const rec = newItem(invoiceText({ kind: 'Receipt', num: '5001', date: '12/06/2026', total: '50.00' }));
+  assert.equal(await processItem(rec.id, deps()), 'done');
+});
+
+test('a receipt naming the invoice number pairs with it even when an amount-only match is nearer', async () => {
+  pairVendor();
+  const a = newItem(invoiceText({ kind: 'Tax Invoice', num: '1001', date: '01/06/2026' }));
+  const b = newItem(invoiceText({ kind: 'Tax Invoice', num: '1002', date: '10/06/2026' }));
+  await processItem(a.id, deps()); await processItem(b.id, deps());
+  const rec = newItem(`${invoiceText({ kind: 'Receipt', num: '5001', date: '12/06/2026' })}\nPaid for 1001`);
+  assert.equal(await processItem(rec.id, deps()), 'ignored');
+  assert.ok(notes(rec.id).includes(`receipt_of_invoice:${a.id}`));
+});
+
+// ---------- recipe change re-reads the vendor's waiting documents ----------
+
+test('reapplyVendorRecipe: fixed recipe re-reads unfiled documents; hand-fixed and filed ones are left alone', async () => {
+  // A recipe that reads the total from the wrong line: every document fails validation (no total).
+  knownVendor('acme', 'billing@acme.example', 'business', 'תוכנות', {
+    fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Sum: ([\\d.]+)', parse: 'amount' } },
+  });
+  const a = newItem(invoiceText({ num: '1001' }), { mode: 'backfill' });
+  const b = newItem(invoiceText({ num: '1002', total: '200.00' }), { mode: 'backfill' });
+  const c = newItem(invoiceText({ num: '1003' }), { mode: 'backfill' });
+  for (const x of [a, b, c]) assert.equal(await processItem(x.id, deps()), 'needs_attention');
+  // c was corrected by hand: the owner's fields stay.
+  getDb().prepare(`UPDATE items SET provenance = 'manual' WHERE id = ?`).run(c.id);
+
+  saveRecipe(layoutRecipe('acme', 'billing@acme.example'), 'user');
+  const r = reapplyVendorRecipe('acme', SETTINGS, NOW);
+  assert.deepEqual(r, { checked: 2, updated: 2 });
+  assert.equal(getItem(a.id)!.state, 'awaiting_backfill_approval');
+  assert.equal(getItem(a.id)!.fields?.total, 117);
+  assert.equal(getItem(a.id)!.fields?.category, 'תוכנות');
+  assert.equal(getItem(b.id)!.fields?.total, 200);
+  assert.ok(notes(a.id).includes('recipe_reapplied'));
+  assert.equal(getItem(c.id)!.state, 'needs_attention');
+
+  // Same recipe again: nothing new to read.
+  assert.deepEqual(reapplyVendorRecipe('acme', SETTINGS, NOW), { checked: 2, updated: 0 });
+});
+
+test('reapplyVendorRecipe: a recipe that still reads wrong keeps the previous fields', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const a = newItem(invoiceText(), { mode: 'backfill' });
+  assert.equal(await processItem(a.id, deps()), 'awaiting_backfill_approval');
+  saveRecipe(layoutRecipe('acme', 'billing@acme.example', {
+    fields: { ...layoutRecipe('acme', 'x').fields, total: { kind: 'regex', pattern: 'Nope: ([\\d.]+)', parse: 'amount' } },
+  }), 'user');
+  assert.deepEqual(reapplyVendorRecipe('acme', SETTINGS, NOW), { checked: 1, updated: 0 });
+  assert.equal(getItem(a.id)!.fields?.total, 117);
+  assert.equal(getItem(a.id)!.state, 'awaiting_backfill_approval');
+});
+
+// ---------- AI token usage ----------
+
+test('AI usage is recorded per document and summed for the first import', async () => {
+  const ai = fakeAi();
+  const orig = ai.completeJson;
+  ai.completeJson = async (req) => {
+    req.onUsage?.({ inputTokens: req.system === EXTRACT_SYSTEM ? 1000 : 2000, outputTokens: 100 });
+    return orig(req);
+  };
+  const a = newItem(invoiceText(), { mode: 'backfill' });
+  await processItem(a.id, deps({ ai }));
+  const u = itemUsage(a.id);
+  assert.equal(u.calls, ai.extractCalls + ai.recipeCalls);
+  assert.equal(u.inputTokens, 1000 * ai.extractCalls + 2000 * ai.recipeCalls);
+  assert.equal(u.outputTokens, 100 * u.calls);
+  const sum = usageSummary(NOW);
+  assert.deepEqual(sum.backfill, u);
+  assert.equal(sum.total.calls, u.calls);
 });

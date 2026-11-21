@@ -1,7 +1,7 @@
 import { getDb } from '../db.js';
-import { getSettings } from '../settings.js';
+import { getSettings, type Settings } from '../settings.js';
 import { AiUnavailableError, aiExtract, aiWriteRecipe } from '../ai/provider.js';
-import { markReceiptFor, findReceiptForSentInvoice, sha256 } from './dedupe.js';
+import { findInvoiceForReceipt, findReceiptsForInvoice, markReceiptFor, findReceiptForSentInvoice, sha256 } from './dedupe.js';
 import {
   getEmail, getItem, getItemPdf, isUploadId, noteItem, setItemFields, setItemText, setItemVendor, transition, transitionIf,
   updateItem,
@@ -9,7 +9,7 @@ import {
 } from './items.js';
 import { buildFilename, buildFolder } from './naming.js';
 import { PdfError, extractPdfText } from './pdfText.js';
-import { runRecipe, type Recipe } from './recipe.js';
+import { matchesRecipe, runRecipe, type Recipe } from './recipe.js';
 import { findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
 import { TransientError } from './types.js';
 import type { Deps, ExtractedFields, ItemState, Provenance, Reason } from './types.js';
@@ -81,6 +81,60 @@ export async function setVendorDecision(vendorKey: string, status: VendorStatus,
     await processItem(id, deps);
   }
   return ids;
+}
+
+/** States in which an item's fields are not final yet (nothing filed under them). */
+const UNSETTLED: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_backfill_approval', 'ready'];
+
+/**
+ * After the owner changed a vendor's recipe: reads the vendor's not-yet-filed documents again with it, so the
+ * documents imported before the fix show what the new recipe reads. Recipe only (no AI, no tokens, no recipe
+ * rewrite). Skipped: documents the owner corrected by hand, ones the recipe does not match, and ones it still
+ * reads wrong (their previous fields stay). A fixed document that waited for a fix moves on as a hand-fixed one
+ * would. Returns how many were checked and how many got new fields.
+ */
+export function reapplyVendorRecipe(vendorKey: string, settings: Settings, now: Date): { checked: number; updated: number } {
+  const recipe = getActiveRecipe(vendorKey);
+  if (!recipe || recipe.aiAlways) return { checked: 0, updated: 0 };
+  const today = localDate({ settings, now: () => now } as Deps);
+  const names = new Set(settings.categories.map((c) => c.name));
+  const ids = getDb().prepare(
+    `SELECT id FROM items WHERE vendor_key = ? AND state IN (${UNSETTLED.map(() => '?').join(',')})
+       AND storage_path IS NULL AND text IS NOT NULL AND COALESCE(provenance, '') != 'manual'
+       AND NOT (state = 'needs_attention' AND COALESCE(reason, '') IN ('storage_error', 'accounting_error'))
+     ORDER BY created_at, rowid`,
+  ).pluck().all(vendorKey, ...UNSETTLED) as string[];
+  let checked = 0;
+  let updated = 0;
+  for (const id of ids) {
+    if (inFlight.has(id)) continue;
+    const item = getItem(id);
+    if (!item?.text || !UNSETTLED.includes(item.state)) continue;
+    const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
+    if (!matchesRecipe(recipe, sender, item.text)) continue;
+    checked++;
+    const read = runRecipe(recipe, item.text);
+    const vendor = getVendor(vendorKey);
+    const category = read.category && names.has(read.category) ? read.category
+      : item.fields?.category && names.has(item.fields.category) ? item.fields.category
+        : vendor?.defaultCategory && names.has(vendor.defaultCategory) ? vendor.defaultCategory : null;
+    const fields: ExtractedFields = { ...read, category };
+    if (!validateFields(fields, settings, today).ok) continue;
+    const { vatConfirmed: _v, ...before } = item.fields ?? ({} as ExtractedFields);
+    void _v;
+    if (JSON.stringify(before) === JSON.stringify(fields)) continue;
+    setItemFields(id, fields, 'recipe');
+    updated++;
+    if (currentState(id) === 'dismissed') continue; // the new doc number is one already on file
+    noteItem(id, 'recipe_reapplied');
+    if (settleReceiptPair(id, vendorKey, fields, item.text)) continue;
+    if (item.state !== 'needs_attention' || !category) continue;
+    const email = getEmail(item.messageId);
+    if (vendor?.status === 'ignored') moveTo(id, 'ignored', undefined, 'vendor_ignored');
+    else if (!vendor || vendor.status === 'unreviewed') moveTo(id, 'awaiting_vendor', 'new_vendor', 'recipe_reapplied');
+    else moveTo(id, email?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready', undefined, 'recipe_reapplied');
+  }
+  return { checked, updated };
 }
 
 /**
@@ -159,7 +213,10 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   if (!fields) {
     if (!ai) return moveTo(item.id, 'needs_attention', 'no_recipe_no_ai');
     try {
-      fields = await aiExtract(ai, { text: doc.text, pdf, isScan: doc.isScan, sender, categories: settings.categories.map((c) => c.name) });
+      fields = await aiExtract(
+        ai, { text: doc.text, pdf, isScan: doc.isScan, sender, categories: settings.categories.map((c) => c.name) },
+        { purpose: 'extract', itemId: item.id },
+      );
     } catch (e) {
       if (isDbError(e)) throw e;
       if (e instanceof AiUnavailableError) return waitForAi(item, deps, e.message);
@@ -196,6 +253,10 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
 
   const v = validateFields(fields, settings, today);
   if (!v.ok) return moveTo(item.id, 'needs_attention', v.problems[0], v.problems.join(','));
+
+  // A vendor that sends a tax invoice and later a receipt for it: the invoice is the expense, the receipt is
+  // neither filed nor booked (and no recipe is written from it, which would replace the invoice layout's).
+  if (vendorKey && settleReceiptPair(item.id, vendorKey, fields, doc.text)) return;
 
   // A photographed receipt has no text and no sender, so there is nothing a recipe could match or read.
   if (writeRecipe && ai && vendorKey && !(uploaded && doc.isScan)) {
@@ -305,6 +366,34 @@ async function account(item: Item, deps: Deps): Promise<void> {
 }
 
 // ---------- helpers ----------
+
+/**
+ * Receipt + separate tax invoice for one payment: only the invoice counts. A receipt whose invoice is already on
+ * file is set aside (`ignored`) at once; an invoice that arrives after its receipt sets aside the receipt if it was
+ * not filed yet (a filed one stays, and the accounting step still refuses to book it twice).
+ * Returns true when this item itself was set aside.
+ */
+function settleReceiptPair(itemId: string, vendorKey: string, fields: ExtractedFields, text: string): boolean {
+  if (fields.docType === 'receipt') {
+    const invoiceId = findInvoiceForReceipt(fields, vendorKey, text, itemId);
+    if (!invoiceId) return false;
+    getDb().transaction(() => {
+      markReceiptFor(itemId, invoiceId);
+      moveTo(itemId, 'ignored', undefined, `receipt_of_invoice:${invoiceId}`);
+    })();
+    return true;
+  }
+  if (fields.docType === 'tax_invoice') {
+    for (const receiptId of findReceiptsForInvoice(fields, vendorKey, itemId)) {
+      if (inFlight.has(receiptId)) continue; // being processed right now: it checks for this invoice itself
+      getDb().transaction(() => {
+        markReceiptFor(receiptId, itemId);
+        moveTo(receiptId, 'ignored', undefined, `receipt_of_invoice:${itemId}`);
+      })();
+    }
+  }
+  return false;
+}
 
 const digitsOf = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '');
 const nameKey = (s: string | null | undefined) => (s ?? '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
@@ -438,7 +527,7 @@ async function writeAiRecipe(
 ): Promise<void> {
   const previous = i.failed ?? i.existing;
   try {
-    const r = await aiWriteRecipe(ai, { text: i.text, sender: i.sender, fields: i.fields, previous });
+    const r = await aiWriteRecipe(ai, { text: i.text, sender: i.sender, fields: i.fields, previous }, { purpose: 'recipe', itemId });
     let next: Recipe;
     if (i.failed) next = { ...r, match: i.failed.match };
     else if (i.existing) {

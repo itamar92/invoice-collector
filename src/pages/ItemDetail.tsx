@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import type { ExtractedFields, ItemState, Reason } from '../api.js';
+import type { ExtractedFields, ItemState, Reason, Reapplied } from '../api.js';
 import {
   AiThinking, Button, Card, ErrorText, Field, fmtDateTime, hintCls, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
-  setFlash, StateBadge, stateLabel, useAction, useApp, useLoad,
+  setFlash, StateBadge, stateLabel, usageText, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -92,6 +92,14 @@ export default function ItemDetail() {
     } else await leave(t('item.savedNamed', { name: itemTitle(item) }));
   }, andSend ? 'send' : 'save');
   const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); }, 'retry');
+  // Set aside as the receipt of a tax invoice already on file (only the invoice counts as the expense).
+  const invoiceOf = item.state === 'ignored'
+    ? item.events.map((e) => /^receipt_of_invoice:(.+)$/.exec(e.note ?? '')?.[1]).filter(Boolean).pop() ?? null
+    : null;
+  const keepReceipt = () => act.run(async () => {
+    await api.keepReceipt(item.id);
+    await leave(t('item.receiptKeptNamed', { name: itemTitle(item) }));
+  }, 'keep-receipt');
   const dismiss = () => {
     if (!window.confirm(t('item.dismissConfirm'))) return;
     void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); }, 'dismiss');
@@ -122,6 +130,13 @@ export default function ItemDetail() {
       {item.reason && item.state === 'needs_attention' && <ErrorText>{t('common.reason')}: {reasonLabel(item.reason)}</ErrorText>}
       {uploaded && !msg && !(uploaded === 'new' && item.state === 'needs_attention') && <Notice tone={uploaded === 'new' ? 'ok' : 'warn'}>{t(`upload.${uploaded}`)}</Notice>}
       {msg && <Notice tone="ok">{msg}</Notice>}
+      {invoiceOf && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-info-tint px-3 py-2 text-sm">
+          <span>{t('item.receiptSetAside')}</span>
+          <Link className="font-semibold text-accent underline" to={`/items/${invoiceOf}`}>{t('item.openInvoice')}</Link>
+          <Button variant="ghost" className="ms-auto" loading={act.is('keep-receipt')} disabled={act.busy} onClick={keepReceipt}>{t('item.keepReceipt')}</Button>
+        </div>
+      )}
 
       {/* Phone: fields first, the document below. Desktop: side by side, the document stays in view. */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
@@ -175,12 +190,13 @@ export default function ItemDetail() {
           <ErrorText>{act.error}</ErrorText>
 
           {item.hasText && (editable || item.vendorKey) && (
-            <RecipeFromFix canSave={patch !== null} dirty={dirty} disabled={act.busy} saveFirst={saveForRecipe} />
+            <RecipeFromFix canSave={patch !== null} dirty={dirty} disabled={act.busy} saveFirst={saveForRecipe} onRecipeSaved={() => void refreshSummary()} />
           )}
 
           <dl className="mt-4 space-y-1 text-xs text-muted">
             {item.attachmentName && <div><dt className="inline font-semibold">{t('item.attachment')}: </dt><dd className="inline"><bdi>{item.attachmentName}</bdi></dd></div>}
             {item.provenance && <div><dt className="inline font-semibold">{t('item.provenance')}: </dt><dd className="inline">{t(`item.provenance.${item.provenance}` as MessageKey)}</dd></div>}
+            {item.aiUsage.calls > 0 && <div><dt className="inline font-semibold">{t('item.aiUsage')}: </dt><dd className="num inline">{usageText(item.aiUsage)}</dd></div>}
             {item.storagePath && <div><dt className="inline font-semibold">{t('item.storagePath')}: </dt><dd className="inline"><bdi className="ltr break-all font-mono">{item.storagePath}</bdi></dd></div>}
             {item.accountingRef && <div><dt className="inline font-semibold">{t('item.accounting')}: </dt><dd className="inline"><bdi className="ltr break-all font-mono">{item.accountingMode} · {item.accountingRef}</bdi></dd></div>}
           </dl>
@@ -213,18 +229,20 @@ export default function ItemDetail() {
  * reads them that way. The corrections are saved first (they are what the recipe must reproduce); the new recipe
  * is saved only when the owner presses save.
  */
-function RecipeFromFix({ canSave, dirty, disabled, saveFirst }: {
-  canSave: boolean; dirty: boolean; disabled: boolean; saveFirst: () => Promise<string | null>;
+function RecipeFromFix({ canSave, dirty, disabled, saveFirst, onRecipeSaved }: {
+  canSave: boolean; dirty: boolean; disabled: boolean; saveFirst: () => Promise<string | null>; onRecipeSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
-  const [draft, setDraft] = useState<{ vendorKey: string; recipe: Record<string, unknown>; reproduces: boolean } | null>(null);
-  const [savedRecipe, setSavedRecipe] = useState(false);
+  const [draft, setDraft] = useState<{
+    vendorKey: string; recipe: Record<string, unknown>; reproduces: boolean; usage: Parameters<typeof usageText>[0];
+  } | null>(null);
+  const [savedRecipe, setSavedRecipe] = useState<Reapplied | null>(null);
   const act = useAction();
   const { id = '' } = useParams();
 
   const build = () => act.run(async () => {
-    setDraft(null); setSavedRecipe(false);
+    setDraft(null); setSavedRecipe(null);
     const vendorKey = await saveFirst();
     if (!vendorKey) throw new Error(t('item.recipeFix.noVendor'));
     const r = await api.regenerateRecipe(vendorKey, id, comment.trim());
@@ -232,8 +250,9 @@ function RecipeFromFix({ canSave, dirty, disabled, saveFirst }: {
   }, 'build');
   const keep = () => act.run(async () => {
     if (!draft) return;
-    await api.saveRecipe(draft.vendorKey, draft.recipe);
-    setSavedRecipe(true);
+    const r = await api.saveRecipe(draft.vendorKey, draft.recipe);
+    setSavedRecipe(r.reapplied);
+    onRecipeSaved();
   }, 'keep');
 
   if (!open) {
@@ -269,12 +288,14 @@ function RecipeFromFix({ canSave, dirty, disabled, saveFirst }: {
       {draft && (
         <div className="space-y-2">
           <Notice tone={draft.reproduces ? 'ok' : 'warn'}>{draft.reproduces ? t('item.recipeFix.ok') : t('item.recipeFix.miss')}</Notice>
+          <p className="num text-xs text-muted">{t('vendors.regen.usage', { line: usageText(draft.usage) })}</p>
           <details className="text-xs">
             <summary className="cursor-pointer font-semibold text-accent">{t('item.recipeFix.show')}</summary>
             <pre className="ltr mt-1 max-h-64 overflow-auto rounded-lg bg-white p-2 font-mono text-[11px]">{JSON.stringify(draft.recipe, null, 2)}</pre>
           </details>
           {savedRecipe
-            ? <Notice tone="ok">{t('item.recipeFix.saved')}</Notice>
+            ? <Notice tone="ok">{savedRecipe.updated > 0 ? t('item.recipeFix.reapplied', { ...savedRecipe })
+              : savedRecipe.checked > 0 ? t('item.recipeFix.reappliedSame', { ...savedRecipe }) : t('item.recipeFix.saved')}</Notice>
             : (
               <div className="flex flex-wrap gap-2">
                 <Button loading={act.is('keep')} disabled={act.busy} onClick={keep}>{t('item.recipeFix.keep')}</Button>

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
-import type { Item, RecipeVersion, Vendor, VendorStatus } from '../api.js';
+import type { AiUsageTotals, Item, Reapplied, RecipeVersion, Vendor, VendorStatus } from '../api.js';
 import {
-  AiThinking, Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, useAction, useApp, useLoad,
+  AiThinking, Avatar, Button, Card, Empty, ErrorText, fmtDate, fmtDateTime, fmtMoney, hintCls, itemTitle, Notice, Icon, inputCls, rowCls, Saved, Loading, PageTitle, usageText, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
@@ -21,7 +21,7 @@ function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json:
   const usable = (docs.data?.items ?? []).filter((i) => i.fields && i.hasText);
   const [itemId, setItemId] = useState('');
   const [comment, setComment] = useState('');
-  const [result, setResult] = useState<boolean | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; usage: AiUsageTotals } | null>(null);
   const act = useAction();
   const chosen = itemId || usable[0]?.id || '';
 
@@ -29,7 +29,7 @@ function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json:
     setResult(null);
     const r = await api.regenerateRecipe(vendor.key, chosen, comment);
     onDraft(JSON.stringify(r.recipe, null, 2));
-    setResult(r.reproduces);
+    setResult({ ok: r.reproduces, usage: r.usage });
   });
 
   return (
@@ -55,7 +55,8 @@ function RegenerateRecipe({ vendor, onDraft }: { vendor: Vendor; onDraft: (json:
           {act.busy
             ? <AiThinking title={t('vendors.regen.running')} hint={t('item.recipeFix.thinkingHint')} />
             : <Button variant="secondary" disabled={!chosen} onClick={run}>{t('vendors.regen.run')}</Button>}
-          {result !== null && <Notice tone={result ? 'ok' : 'warn'}>{result ? t('vendors.regen.ok') : t('vendors.regen.miss')}</Notice>}
+          {result !== null && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.ok ? t('vendors.regen.ok') : t('vendors.regen.miss')}</Notice>}
+          {result !== null && <p className="num text-xs text-muted">{t('vendors.regen.usage', { line: usageText(result.usage) })}</p>}
           <ErrorText>{act.error}</ErrorText>
         </>
       )}
@@ -70,15 +71,20 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
   const [text, setText] = useState<string | null>(null);
   const act = useAction();
   const [saved, setSaved] = useState(false);
+  const [reapplied, setReapplied] = useState<Reapplied | null>(null);
+  const { refreshSummary } = useApp();
   const value = text ?? (latest ? JSON.stringify(latest.recipe, null, 2) : '');
 
   const save = () => act.run(async () => {
     let parsed: unknown;
     try { parsed = JSON.parse(value); } catch { throw new Error(t('vendors.invalidJson')); }
-    await api.saveRecipe(vendor.key, parsed);
-    setText(null); setSaved(true); await history.reload();
+    const r = await api.saveRecipe(vendor.key, parsed);
+    setText(null); setSaved(true); setReapplied(r.reapplied); await history.reload(); await refreshSummary();
   });
-  const toggleAi = (v: boolean) => act.run(async () => { await api.setAiAlways(vendor.key, v); setSaved(false); await history.reload(); });
+  const toggleAi = (v: boolean) => act.run(async () => {
+    const r = await api.setAiAlways(vendor.key, v);
+    setSaved(false); setReapplied(r.reapplied.checked > 0 ? r.reapplied : null); await history.reload(); await refreshSummary();
+  });
 
   if (history.loading && !history.data) return <Loading />;
   return (
@@ -95,12 +101,15 @@ function RecipeEditor({ vendor }: { vendor: Vendor }) {
       <div>
         <p className={`mb-1 ${hintCls}`}>{t('vendors.recipeHint')}</p>
         <textarea aria-label={t('vendors.recipeHint')} className={`${inputCls} ltr h-64 font-mono text-xs`} spellCheck={false} value={value}
-          onChange={(e) => { setText(e.target.value); setSaved(false); }} />
+          onChange={(e) => { setText(e.target.value); setSaved(false); setReapplied(null); }} />
       </div>
       <div className="flex items-center gap-2">
         <Button disabled={act.busy || !value.trim() || text === null} onClick={save}>{t('vendors.saveRecipe')}</Button>
         <Saved show={saved} />
       </div>
+      {reapplied && reapplied.checked > 0 && (
+        <Notice tone="ok">{reapplied.updated > 0 ? t('vendors.reapplied', { ...reapplied }) : t('vendors.reappliedSame', { ...reapplied })}</Notice>
+      )}
       <ErrorText>{act.error}</ErrorText>
       {versions.length > 0 && (
         <div>

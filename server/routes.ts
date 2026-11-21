@@ -3,6 +3,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { z, ZodError } from 'zod';
 import { AiOutputError, AiUnavailableError, aiWriteRecipe, getAiProvider, reproduces } from './ai/provider.js';
 import type { AiProvider } from './ai/provider.js';
+import { emptyTotals, itemUsage, usageSummary } from './ai/usage.js';
 import { requireUser } from './auth.js';
 import {
   approveBackfill, BACKFILL_INTERRUPTED, backfillList, finishBackfill, skipBackfill, startBackfill,
@@ -12,7 +13,7 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
-import { setVendorDecision, vendorKeyFor } from './core/pipeline.js';
+import { reapplyVendorRecipe, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { compileRecipe, RecipeError } from './core/recipe.js';
 import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
@@ -205,7 +206,10 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
     const { text, ...rest } = item;
-    res.json({ ...rest, hasText: !!text?.trim(), events: eventsOf(item.id), emailMode: getEmail(item.messageId)?.mode ?? null });
+    res.json({
+      ...rest, hasText: !!text?.trim(), events: eventsOf(item.id), emailMode: getEmail(item.messageId)?.mode ?? null,
+      aiUsage: itemUsage(item.id),
+    });
   }));
 
   r.get('/items/:id/pdf', wrap((req, res) => {
@@ -300,6 +304,24 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json(getItem(item.id));
   }));
 
+  // A receipt set aside because its tax invoice is on file (pipeline settleReceiptPair): the owner files it anyway.
+  r.post('/items/:id/keep-receipt', wrap((req, res) => {
+    const item = getItem(param(req, 'id'));
+    if (!item) throw notFound('item');
+    const paired = item.state === 'ignored' && eventsOf(item.id).some((e) => e.note?.startsWith('receipt_of_invoice:'));
+    if (!paired) throw new HttpError(409, 'item_not_set_aside_receipt');
+    const vendor = item.vendorKey ? getVendor(item.vendorKey) : null;
+    const to: ItemState = !vendor || vendor.status === 'unreviewed' ? 'awaiting_vendor'
+      : vendor.status === 'ignored' ? 'ignored'
+        : item.storagePath ? 'stored'
+          : getEmail(item.messageId)?.mode === 'backfill' ? 'awaiting_backfill_approval' : 'ready';
+    getDb().transaction(() => {
+      updateItem(item.id, { attempts: 0, nextAttemptAt: null });
+      transition(item.id, to, to === 'awaiting_vendor' ? 'new_vendor' : undefined, 'receipt_kept');
+    })();
+    res.json(getItem(item.id));
+  }));
+
   r.post('/items/:id/dismiss', wrap((req, res) => {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
@@ -350,7 +372,9 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const key = param(req, 'key');
     const recipe = compileRecipe(req.body); // throws RecipeError -> 400 with its message
     if (recipe.vendorKey !== key) throw new HttpError(400, 'recipe_vendor_mismatch');
-    res.json({ ok: true, id: saveRecipe(recipe, 'user') });
+    const id = saveRecipe(recipe, 'user');
+    // The vendor's documents imported before this fix are read again with it.
+    res.json({ ok: true, id, reapplied: reapplyVendorRecipe(key, getSettings(), clock()) });
   }));
 
   // The AI rewrites the vendor's recipe from one of its documents, guided by the owner's notes. Nothing is
@@ -369,8 +393,12 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const previous = getActiveRecipe(key) ?? undefined;
     const sender = isUploadId(item.messageId) ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
     let draft;
+    const usage = emptyTotals();
     try {
-      draft = await aiWriteRecipe(ai, { text: item.text, sender, fields: item.fields, previous, feedback: comment || undefined });
+      draft = await aiWriteRecipe(
+        ai, { text: item.text, sender, fields: item.fields, previous, feedback: comment || undefined },
+        { purpose: 'regenerate', itemId: item.id, sink: usage },
+      );
     } catch (e) {
       if (e instanceof AiUnavailableError) throw new HttpError(503, 'ai_unavailable');
       if (e instanceof AiOutputError) throw new HttpError(502, 'ai_bad_recipe');
@@ -382,7 +410,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
       ...rest, vendorKey: key, displayName: previous?.displayName ?? vendor.displayName,
       ...(previous?.aiAlways ? { aiAlways: true } : {}),
     });
-    res.json({ recipe, reproduces: reproduces(recipe, item.text, item.fields) });
+    res.json({ recipe, reproduces: reproduces(recipe, item.text, item.fields), usage });
   }));
 
   r.put('/vendors/:key/ai-always', wrap((req, res) => {
@@ -393,8 +421,11 @@ export function apiRouter(ctx: ApiContext): express.Router {
     if (!recipe) throw notFound('recipe');
     const { aiAlways: _drop, ...rest } = recipe;
     saveRecipe(value ? { ...rest, aiAlways: true } : rest, 'user');
-    res.json({ ok: true, aiAlways: value });
+    const reapplied = value ? { checked: 0, updated: 0 } : reapplyVendorRecipe(key, getSettings(), clock());
+    res.json({ ok: true, aiAlways: value, reapplied });
   }));
+
+  r.get('/ai/usage', wrap((_req, res) => { res.json(usageSummary(clock())); }));
 
   // ---------- backfill ----------
   r.get('/backfill', wrap(async (_req, res) => {
@@ -402,7 +433,11 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const s = getSettings();
     res.json({
       rows, running: backfillJob !== null, startedAt: s.backfillStartedAt, finishedAt: s.backfillFinishedAt,
-      result: s.backfillResult, error: sanitizeError(s.backfillError),
+      result: s.backfillResult, error: sanitizeError(s.backfillError), aiUsage: usageSummary(clock()).backfill,
+      receiptsSetAside: getDb().prepare(
+        `SELECT COUNT(*) FROM items i JOIN emails e ON e.message_id = i.message_id
+         WHERE e.mode = 'backfill' AND i.state = 'ignored' AND EXISTS (
+           SELECT 1 FROM item_events v WHERE v.item_id = i.id AND v.note LIKE 'receipt_of_invoice:%')`).pluck().get() as number,
     });
   }));
   // Long (every email since 1 January): answers 202 at once and runs in the background; GET /backfill polls it.

@@ -1,15 +1,16 @@
 import OpenAI from 'openai';
 import { AiOutputError, mapProviderError, parseJsonReply, type AiProvider, type AiRequest } from './provider.js';
+import { tokens } from './usage.js';
 
 export interface OpenAiLike {
-  responses: { create(params: any): Promise<{ output_text?: string }> };
+  responses: { create(params: any): Promise<{ output_text?: string; usage?: Record<string, unknown> }> };
 }
 
 export class OpenAiProvider implements AiProvider {
   name = 'openai';
   supportsPdf = true;
   private client: OpenAiLike;
-  constructor(apiKey: string, private model: string, client?: OpenAiLike) {
+  constructor(apiKey: string, readonly model: string, client?: OpenAiLike) {
     this.client = client ?? (new OpenAI({ apiKey }) as unknown as OpenAiLike);
   }
 
@@ -34,6 +35,7 @@ export class OpenAiProvider implements AiProvider {
     } catch (e) {
       throw mapProviderError(e);
     }
+    req.onUsage?.(res.usage ? { inputTokens: tokens(res.usage.input_tokens), outputTokens: tokens(res.usage.output_tokens) } : null);
     if (!res.output_text?.trim()) throw new AiOutputError('empty reply');
     return parseJsonReply(res.output_text);
   }

@@ -21,9 +21,16 @@ export interface Item {
   /** Lists only: the document's text was extracted (a recipe can be written from it). */
   hasText?: boolean;
 }
+/** Calls and tokens over some AI calls; `unknownCalls` reported no token counts (SSH agent). */
+export interface AiUsageTotals { calls: number; inputTokens: number; outputTokens: number; unknownCalls: number }
+export interface AiUsageSummary { today: AiUsageTotals; month: AiUsageTotals; total: AiUsageTotals; backfill: AiUsageTotals }
+/** After a recipe change: the vendor's unfiled documents read again with it. */
+export interface Reapplied { checked: number; updated: number }
 export interface ItemEvent { at: string; from: string | null; to: string; note: string | null }
 /** emailMode 'backfill': the item can be filed but is never sent to Morning, so the UI offers no "send". */
-export type ItemDetail = Item & { events: ItemEvent[]; emailMode: 'ongoing' | 'backfill' | 'manual' | null; hasText: boolean };
+export type ItemDetail = Item & {
+  events: ItemEvent[]; emailMode: 'ongoing' | 'backfill' | 'manual' | null; hasText: boolean; aiUsage: AiUsageTotals;
+};
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
 export interface Vendor { key: string; displayName: string; status: VendorStatus; defaultCategory: string | null; createdAt: string }
@@ -37,6 +44,7 @@ export interface BackfillRow {
 export interface BackfillStatus {
   rows: BackfillRow[]; running: boolean; startedAt: string | null; finishedAt: string | null;
   result: { emails: number; items: number; failed: number } | null; error: string | null;
+  aiUsage: AiUsageTotals; receiptsSetAside: number;
 }
 export interface MissedRow {
   messageId: string; sender: string | null; subject: string | null; receivedAt: string | null;
@@ -135,6 +143,8 @@ export const api = {
     send<{ item: Item; valid: boolean; problems: Reason[] }>('PUT', `/api/items/${enc(id)}/fields`, patch),
   retry: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/retry`),
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
+  /** A receipt set aside because its tax invoice is on file: file it anyway. */
+  keepReceipt: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/keep-receipt`),
   ingestFailures: () => get<IngestFailure[]>('/api/ingest-failures'),
   /** A photographed receipt (JPEG) or a PDF. Answers once it was read; `duplicate` points at the existing item. */
   upload: (file: Blob, name: string) =>
@@ -144,11 +154,11 @@ export const api = {
   setVendor: (key: string, patch: { status?: VendorStatus; defaultCategory?: string | null }) =>
     send<{ vendor: Vendor; touched: string[]; processed: boolean }>('PUT', `/api/vendors/${enc(key)}`, patch),
   recipes: (key: string) => get<RecipeVersion[]>(`/api/vendors/${enc(key)}/recipes`),
-  saveRecipe: (key: string, recipe: unknown) => send<{ ok: true; id: number }>('PUT', `/api/vendors/${enc(key)}/recipe`, recipe),
+  saveRecipe: (key: string, recipe: unknown) => send<{ ok: true; id: number; reapplied: Reapplied }>('PUT', `/api/vendors/${enc(key)}/recipe`, recipe),
   /** An AI-written draft of the vendor's recipe from one of its documents; not saved. */
   regenerateRecipe: (key: string, itemId: string, comment: string) =>
-    send<{ recipe: Record<string, unknown>; reproduces: boolean }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
-  setAiAlways: (key: string, value: boolean) => send<{ ok: true }>('PUT', `/api/vendors/${enc(key)}/ai-always`, { value }),
+    send<{ recipe: Record<string, unknown>; reproduces: boolean; usage: AiUsageTotals }>('POST', `/api/vendors/${enc(key)}/recipe/regenerate`, { itemId, comment }),
+  setAiAlways: (key: string, value: boolean) => send<{ ok: true; reapplied: Reapplied }>('PUT', `/api/vendors/${enc(key)}/ai-always`, { value }),
 
   backfill: (quiet = false) => get<BackfillStatus>('/api/backfill', quiet),
   /** 202: the run continues in the background; 409 backfill_running if one is already going. */
@@ -171,6 +181,7 @@ export const api = {
   relayConnect: (invite?: string) => send<{ url: string; expiresAt: string }>('POST', '/api/telegram/relay/connect', invite ? { invite } : {}),
   relayUnlink: (chatId: string) => del<{ ok: true }>(`/api/telegram/relay/chats/${enc(chatId)}`),
   testTelegram: () => send<{ ok: boolean; username?: string; error?: string }>('POST', '/api/telegram/test'),
+  aiUsage: () => get<AiUsageSummary>('/api/ai/usage'),
   testAi: () => send<{ ok: boolean; provider: string; error?: string }>('POST', '/api/ai/test'),
   detectMorning: () => send<{ modes: MorningModes; verified: false }>('POST', '/api/morning/detect'),
   morningClassifications: () => get<{ classifications: MorningClassification[] }>('/api/morning/classifications'),

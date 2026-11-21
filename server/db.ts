@@ -156,6 +156,25 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX relay_updates_tenant ON relay_updates (tenant_id, id);
     `,
   },
+  {
+    // One row per AI reply, with the tokens the provider reported (null when it did not say).
+    version: 8,
+    sql: `
+      CREATE TABLE ai_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        day TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        item_id TEXT,
+        provider TEXT NOT NULL,
+        model TEXT,
+        input_tokens INTEGER,
+        output_tokens INTEGER
+      );
+      CREATE INDEX ai_usage_item ON ai_usage (item_id);
+      CREATE INDEX ai_usage_day ON ai_usage (day);
+    `,
+  },
 ];
 
 export function migrate(db: Db, migrations = MIGRATIONS): void {

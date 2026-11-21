@@ -1,9 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
 import { AiOutputError, mapProviderError, parseJsonReply, type AiProvider, type AiRequest } from './provider.js';
+import { tokens } from './usage.js';
 
 export interface GeminiLike {
   models: {
-    generateContent(params: any): Promise<{ text?: string }>;
+    generateContent(params: any): Promise<{ text?: string; usageMetadata?: Record<string, unknown> }>;
     get(params: { model: string }): Promise<unknown>;
   };
 }
@@ -12,7 +13,7 @@ export class GeminiProvider implements AiProvider {
   name = 'gemini';
   supportsPdf = true;
   private client: GeminiLike;
-  constructor(apiKey: string, private model: string, client?: GeminiLike) {
+  constructor(apiKey: string, readonly model: string, client?: GeminiLike) {
     this.client = client ?? (new GoogleGenAI({ apiKey }) as unknown as GeminiLike);
   }
 
@@ -30,6 +31,12 @@ export class GeminiProvider implements AiProvider {
     } catch (e) {
       throw mapProviderError(e);
     }
+    const m = res.usageMetadata;
+    // Thinking tokens are billed as output.
+    req.onUsage?.(m ? {
+      inputTokens: tokens(m.promptTokenCount),
+      outputTokens: (tokens(m.candidatesTokenCount) ?? 0) + (tokens(m.thoughtsTokenCount) ?? 0),
+    } : null);
     if (!res.text?.trim()) throw new AiOutputError('empty reply');
     return parseJsonReply(res.text);
   }
