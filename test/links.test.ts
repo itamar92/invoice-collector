@@ -74,3 +74,48 @@ test('downloadPdf follows redirects, re-checks them, and caps at 3', async () =>
   const ok = (async (u: string) => u.endsWith('/a') ? redirectTo('/b') : resp('%PDF-ok')) as unknown as typeof fetch;
   assert.equal((await downloadPdf('https://a.example/a', { resolve: pub, fetchImpl: ok })).length, 7);
 });
+
+const AKUM_HTML = `
+  <a href="https://acum.org.il/contact/">לבירורים לחץ כאן</a>
+  <a href="http://www.invoice-one.com">לחץ כאן</a>
+  <a href="https://invoice-one.com/ViewerNew/pages/Y_GreeViewer_unsubscribe/ABC123">לחץ כאן</a>
+  <a href="https://invoice-one.com/ViewerNew/pages/Y_GreeViewer_document/ABC123">לחץ כאן לצפיה במסמך</a>`;
+
+test('findInvoiceLinks puts a known viewer link (invoice-one) first and drops its unsubscribe link', () => {
+  const links = findInvoiceLinks(AKUM_HTML, '');
+  assert.equal(links[0], 'https://invoice-one.com/ViewerNew/pages/Y_GreeViewer_document/ABC123');
+  assert.equal(links.some((l) => l.includes('unsubscribe')), false);
+});
+
+test('downloadPdf fetches an invoice-one document through GetPDF and decodes it', async () => {
+  const asked: string[] = [];
+  const pdf = Buffer.from('%PDF-1.7 akum');
+  const fetchImpl = (async (u: string) => {
+    asked.push(u);
+    return resp(JSON.stringify({ Entity: { FileName: 'Archive_Invoice1.pdf', ArrData: pdf.toString('base64') } }));
+  }) as unknown as typeof fetch;
+  for (const link of [
+    'https://invoice-one.com/ViewerNew/pages/Y_GreeViewer_document/ABC123',
+    'https://www.invoice-one.com/viewernew/pages/GreeViewer_document/ABC123',
+  ]) {
+    const b = await downloadPdf(link, { resolve: pub, fetchImpl });
+    assert.equal(b.toString(), '%PDF-1.7 akum');
+  }
+  assert.deepEqual(asked, Array(2).fill('https://invoice-one.com/viewernew/api/GreeViewer/Document/GetPDF?DocumentID=ABC123'));
+});
+
+test('downloadPdf rejects an invoice-one answer without a PDF', async () => {
+  const link = 'https://invoice-one.com/ViewerNew/pages/Y_GreeViewer_document/ABC123';
+  const answer = (body: string) => (async () => resp(body)) as typeof fetch;
+  await assert.rejects(() => downloadPdf(link, { resolve: pub, fetchImpl: answer('<html>') }), code('link_not_pdf'));
+  await assert.rejects(() => downloadPdf(link, { resolve: pub, fetchImpl: answer('{"Entity":null}') }), code('link_not_pdf'));
+  const notPdf = Buffer.from('hello').toString('base64');
+  await assert.rejects(() => downloadPdf(link, { resolve: pub, fetchImpl: answer(`{"Entity":{"ArrData":"${notPdf}"}}`) }), code('link_not_pdf'));
+});
+
+test('a lookalike host is not treated as invoice-one', async () => {
+  const asked: string[] = [];
+  const fetchImpl = (async (u: string) => { asked.push(u); return resp('%PDF-x'); }) as unknown as typeof fetch;
+  await downloadPdf('https://invoice-one.com.evil.example/ViewerNew/pages/Y_GreeViewer_document/ABC123', { resolve: pub, fetchImpl });
+  assert.deepEqual(asked, ['https://invoice-one.com.evil.example/ViewerNew/pages/Y_GreeViewer_document/ABC123']);
+});
