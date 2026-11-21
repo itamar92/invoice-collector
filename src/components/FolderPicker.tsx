@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api.js';
 import { t } from '../i18n/he.js';
-import { Button, ErrorText, hintCls, Icon, inputCls, Loading, Notice, rowCls } from './ui.js';
+import { Button, ErrorText, hintCls, Icon, inputCls, Loading, Notice, rowCls, useAction } from './ui.js';
 
 type Folder = { name: string; path: string };
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')));
@@ -17,6 +17,8 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
   const [error, setError] = useState<string | null>(null);
   const [missingStart, setMissingStart] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  const [created, setCreated] = useState<string | null>(null);
+  const make = useAction();
 
   useEffect(() => {
     let live = true;
@@ -34,11 +36,20 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
   }, [path]);
 
   const crumbs = path.split('/').filter(Boolean);
-  const newClean = newName.trim().replace(/[/\\]/g, '');
+  const newClean = newName.trim();
+  const newBad = /[\\/:*?"<>|]/.test(newClean) || newClean === '.' || newClean === '..' || /[. ]$/.test(newClean);
   const pick = (p: string) => { onPick(p); onClose(); };
+  /** Creates the folder in Dropbox now and opens it, so it can be picked (or a subfolder made in it). */
+  const create = () => make.run(async () => {
+    const r = await api.createDropboxFolder(path, newClean);
+    setNewName(''); setCreated(r.folder.name); setMissingStart(null);
+    setPath(r.folder.path);
+  });
+  useEffect(() => { if (!created) return; const id = setTimeout(() => setCreated(null), 5000); return () => clearTimeout(id); }, [created]);
 
   return (
     <div className="space-y-3 rounded-xl border border-line bg-white p-3">
+      {created && <Notice tone="ok">{t('folders.created', { name: created })}</Notice>}
       {missingStart && <Notice tone="warn">{t('folders.missingStart', { path: missingStart })}</Notice>}
 
       {/* Where we are: every level is a step back up. */}
@@ -65,7 +76,7 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
           </button>
         )}
         {error ? <div className="py-2"><ErrorText>{error}</ErrorText></div>
-          : folders === null ? <Loading />
+          : folders === null ? <Loading label={t('folders.loading')} rows={3} />
           : folders.length === 0 ? <p className="py-3 text-sm text-muted">{t('folders.empty')}</p>
           : (
             <ul>
@@ -81,6 +92,8 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
           )}
       </div>
 
+      {path === '' && <Notice>{t('folders.appFolderHint')}</Notice>}
+
       <div className="flex flex-wrap items-center gap-2">
         <Button disabled={!!error && path !== ''} onClick={() => pick(path)}>
           {path ? t('folders.chooseNamed', { path }) : t('folders.choose')}
@@ -89,12 +102,16 @@ export function FolderPicker({ value, onPick, onClose }: { value: string; onPick
       </div>
 
       <div className="space-y-1 border-t border-line pt-3">
-        <div className="flex gap-2">
-          <input aria-label={t('folders.new')} placeholder={t('folders.newPlaceholder')} className={inputCls}
-            value={newName} onChange={(e) => setNewName(e.target.value)} />
-          <Button variant="secondary" disabled={!newClean} onClick={() => pick(`${path}/${newClean}`)}>{t('folders.useNew')}</Button>
-        </div>
-        <p className={hintCls}>{t('folders.newHint')}</p>
+        <div className="text-[13px] font-medium text-muted">{t('folders.new')}</div>
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (newClean && !newBad && !make.busy && !error) void create(); }}>
+          <input aria-label={t('folders.new')} placeholder={t('folders.newPlaceholder')} className={inputCls} maxLength={255}
+            value={newName} onChange={(e) => { setNewName(e.target.value); make.setError(null); }} />
+          <Button type="submit" variant="secondary" loading={make.busy} disabled={!newClean || newBad || !!error}>
+            <Icon name="folder" />{t('folders.create')}
+          </Button>
+        </form>
+        <p className={hintCls}>{newBad ? t('folders.badName') : t('folders.newHint', { where: path || t('folders.top') })}</p>
+        <ErrorText>{make.error}</ErrorText>
       </div>
     </div>
   );

@@ -54,35 +54,67 @@ export async function startBackfill(gmail: GmailSource, deps: Deps): Promise<{ e
   return { emails, items, failed };
 }
 
-/** Unfinished items from backfill emails, with the proposed filename/folder and a duplicate hint. */
+/**
+ * Duplicate answers per destination and proposed path + content, so reloading the list does not ask Dropbox
+ * again for every row each time.
+ */
+const dupCaches = new WeakMap<object, Map<string, { exists: boolean; at: number }>>();
+const DUP_TTL_MS = 10 * 60_000;
+const DUP_CONCURRENCY = 8;
+
+async function inParallel<T>(xs: T[], limit: number, fn: (x: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const lane = async () => { while (next < xs.length) await fn(xs[next++]); };
+  await Promise.all(Array.from({ length: Math.min(limit, xs.length) }, lane));
+}
+
+/**
+ * Unfinished items from backfill emails, with the proposed filename/folder and a duplicate hint. The hint asks
+ * Dropbox, so only rows still waiting for approval are checked (nothing else is decided from it), several at once,
+ * and each answer is kept for a few minutes.
+ */
 export async function backfillList(deps: Deps): Promise<BackfillRow[]> {
   const ids = getDb().prepare(
     `SELECT i.id FROM items i JOIN emails e ON e.message_id = i.message_id
      WHERE e.mode = 'backfill' AND i.state NOT IN ('done', 'ignored', 'dismissed')
      ORDER BY i.created_at, i.rowid`).pluck().all() as string[];
   const rows: BackfillRow[] = [];
+  const checks: { row: BackfillRow; folder: string; filename: string; hash: string | null }[] = [];
   for (const id of ids) {
     const item = getItem(id);
     if (!item) continue;
     const f = item.fields;
     let filename: string | null = null;
     let folder: string | null = null;
-    let likelyDuplicate = false;
     if (f) {
       try {
         filename = buildFilename(f, deps.settings);
         folder = buildFolder(f, deps.settings);
       } catch { filename = null; folder = null; }
     }
-    const pdf = filename && folder ? getItemPdf(id) : null;
-    if (filename && folder && pdf) {
-      try { likelyDuplicate = (await deps.storage.exists(folder, filename, pdf)).exists; } catch { likelyDuplicate = false; }
-    }
-    rows.push({
+    const row: BackfillRow = {
       id, filename, folder, vendor: f?.vendorName ?? null, total: f?.total ?? null,
-      currency: f?.currency ?? null, issueDate: f?.issueDate ?? null, likelyDuplicate, state: item.state,
-    });
+      currency: f?.currency ?? null, issueDate: f?.issueDate ?? null, likelyDuplicate: false, state: item.state,
+    };
+    rows.push(row);
+    if (filename && folder && item.state === 'awaiting_backfill_approval') checks.push({ row, folder, filename, hash: item.sha256 });
   }
+  let dupCache = dupCaches.get(deps.storage);
+  if (!dupCache) { dupCache = new Map(); dupCaches.set(deps.storage, dupCache); }
+  const cache = dupCache;
+  const now = Date.now();
+  await inParallel(checks, DUP_CONCURRENCY, async (c) => {
+    const key = `${c.folder}\u0000${c.filename}\u0000${c.hash ?? c.row.id}`;
+    const hit = cache.get(key);
+    if (hit && now - hit.at < DUP_TTL_MS) { c.row.likelyDuplicate = hit.exists; return; }
+    const pdf = getItemPdf(c.row.id);
+    if (!pdf) return;
+    try {
+      const exists = (await deps.storage.exists(c.folder, c.filename, pdf)).exists;
+      cache.set(key, { exists, at: now });
+      c.row.likelyDuplicate = exists;
+    } catch { /* unknown: not flagged, and asked again next time */ }
+  });
   return rows;
 }
 

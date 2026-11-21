@@ -61,3 +61,9 @@ test('sum tolerance boundary at exactly 0.05 is accepted (float safe)', () => {
 test('negative vat on non-credit doc is a mismatch (signed compare)', () => {
   assert.deepEqual(problems({ docType: 'tax_invoice', total: 118, vat: -18, net: 100 }), ['vat_mismatch']);
 });
+
+test('an owner-confirmed VAT is not a mismatch; other checks still apply', () => {
+  assert.deepEqual(run({ vat: 17, vatConfirmed: true }), { ok: true });
+  assert.deepEqual(problems({ vat: 17, vatConfirmed: true, total: null }), ['missing_total']);
+  assert.deepEqual(problems({ vat: 17, vatConfirmed: false }), ['vat_mismatch']);
+});

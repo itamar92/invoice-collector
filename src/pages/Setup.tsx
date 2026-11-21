@@ -50,7 +50,7 @@ function StartBackfill({ onStarted }: { onStarted: () => void }) {
             <Button disabled={a.busy} onClick={finishSetup}>{t('start.toList')}</Button>
           </div>
         )
-        : <Button disabled={a.busy || !connected} onClick={start}>{a.busy ? t('start.running') : t('start.run')}</Button>}
+        : <Button loading={a.busy} disabled={!connected} onClick={start}>{a.busy ? t('start.running') : t('start.run')}</Button>}
       <ErrorText>{a.error}</ErrorText>
     </div>
   );

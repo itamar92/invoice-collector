@@ -73,6 +73,25 @@
 .panel { background: var(--color-white); border-radius: 1.25rem; box-shadow: var(--shadow-soft); padding: 1rem; }
 @media (min-width: 48rem) { .panel { padding: 1.25rem; } }
 
+/* Loading: a thin sliding bar along the top edge while any request is out. */
+.loadbar { position: fixed; inset-inline: 0; top: 0; z-index: 60; height: 3px; overflow: hidden; pointer-events: none; background: var(--color-accent-tint); }
+.loadbar::before { content: ""; position: absolute; inset-block: 0; width: 40%; border-radius: 999px; background: var(--color-accent); animation: loadbar-slide 1.1s cubic-bezier(.45,0,.25,1) infinite; }
+@keyframes loadbar-slide { from { inset-inline-start: -40%; } to { inset-inline-start: 100%; } }
+
+/* AI at work: three dots that rise in turn, and a soft sweep across the card. */
+.ai-dots { display: inline-flex; gap: 4px; align-items: center; }
+.ai-dots > span { width: 7px; height: 7px; border-radius: 999px; background: currentColor; animation: ai-dot 1.2s ease-in-out infinite; }
+.ai-dots > span:nth-child(2) { animation-delay: .15s; }
+.ai-dots > span:nth-child(3) { animation-delay: .3s; }
+@keyframes ai-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-5px); opacity: 1; } }
+.ai-sweep { position: relative; overflow: hidden; }
+.ai-sweep::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgb(255 255 255 / .55) 50%, transparent 80%); transform: translateX(-100%); animation: ai-sweep 1.8s ease-in-out infinite; pointer-events: none; }
+@keyframes ai-sweep { to { transform: translateX(100%); } }
+
+/* Placeholder rows while a list loads. */
+.skeleton { border-radius: .5rem; background: linear-gradient(90deg, var(--color-ground-deep) 25%, var(--color-ground) 50%, var(--color-ground-deep) 75%); background-size: 200% 100%; animation: skeleton 1.4s ease-in-out infinite; }
+@keyframes skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }

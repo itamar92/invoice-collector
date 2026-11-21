@@ -119,7 +119,8 @@ provider, so fewer candidate messages means fewer tokens.
 ## 3. Dropbox
 
 1. Create an app at the [Dropbox App Console](https://www.dropbox.com/developers/apps): **Scoped access**,
-   **App folder** (recommended) or **Full Dropbox** access.
+   **App folder** access. The app name you choose is the folder name in the Dropbox; see
+   [Where documents are saved](#where-documents-are-saved) below.
 2. Permissions tab, enable exactly:
    - `files.content.write`
    - `files.metadata.read`
@@ -135,6 +136,21 @@ provider, so fewer candidate messages means fewer tokens.
    Restart, then press connect in Settings.
 
 Files are never overwritten: if a file with the same name exists and differs, a numbered name is used.
+
+### Where documents are saved
+
+The app can read and write only its own folder in the Dropbox, and nothing else. Dropbox creates that folder as
+`Dropbox/Apps/<app name>` the first time the app writes to it, and every path in the app (the storage root, the
+folder template, the folder browser in Settings) starts from there. A storage root of `/חשבוניות` files into
+`Dropbox/Apps/<app name>/חשבוניות`.
+
+- Inside the app folder anything goes: create subfolders (also from the Settings folder browser), rename them,
+  share the app folder with an accountant.
+- **Do not move or rename the app folder itself** (or the `Apps` folder). Dropbox ties the app to that exact
+  location: a moved copy is no longer visible to the app, and the next filing creates a new, empty
+  `Apps/<app name>`.
+- PDFs moved out of the app folder are out of the app's sight. Filed documents are never filed again, so
+  nothing breaks, but the first-import "likely duplicate" hint cannot see them.
 
 ## 4. Morning (accounting), optional
 

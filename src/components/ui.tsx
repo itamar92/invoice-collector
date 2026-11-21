@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ApiError } from '../api.js';
+import { ApiError, onRequestsInFlight } from '../api.js';
 import type { Item, ItemState, SettingsResponse, Summary } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 
@@ -43,15 +43,20 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   return { data, error, code, loading, reload, setData };
 }
 
-/** Wraps an action: tracks busy state and turns a thrown error into a Hebrew message. */
+/**
+ * Wraps an action: tracks busy state and turns a thrown error into a Hebrew message. `tag` names which of several
+ * buttons sharing the action was pressed, so only that one shows the spinner (`is(tag)`).
+ */
 export function useAction() {
   const [busy, setBusy] = useState(false);
+  const [tag, setTag] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const run = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
-    setBusy(true); setError(null);
-    try { return await fn(); } catch (e) { setError((e as Error).message); return undefined; } finally { setBusy(false); }
+  const run = useCallback(async <T,>(fn: () => Promise<T>, which?: string): Promise<T | undefined> => {
+    setBusy(true); setTag(which ?? null); setError(null);
+    try { return await fn(); } catch (e) { setError((e as Error).message); return undefined; } finally { setBusy(false); setTag(null); }
   }, []);
-  return { busy, error, setError, run };
+  const is = useCallback((which: string) => busy && tag === which, [busy, tag]);
+  return { busy, error, setError, run, is };
 }
 
 // ---------- formatting ----------
@@ -89,8 +94,14 @@ const VARIANTS: Record<Variant, string> = {
   danger: 'bg-alert-tint text-alert-deep hover:bg-alert hover:text-white',
   ghost: 'px-2 text-accent hover:bg-accent-tint',
 };
-export function Button({ variant = 'primary', className = '', ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
-  return <button type="button" {...p} className={`${BTN} ${VARIANTS[variant]} ${className}`} />;
+/** `loading`: the action is running — a spinner before the label, and the button is disabled meanwhile. */
+export function Button({ variant = 'primary', className = '', loading, disabled, children, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
+  return (
+    <button type="button" {...p} disabled={disabled || loading} aria-busy={loading || undefined} className={`${BTN} ${VARIANTS[variant]} ${className}`}>
+      {loading && <Spinner className="size-4" />}
+      {children}
+    </button>
+  );
 }
 export function ButtonLink({ to, children, variant = 'secondary' }: { to: string; children: ReactNode; variant?: Variant }) {
   return <Link to={to} className={`${BTN} ${VARIANTS[variant]}`}>{children}</Link>;
@@ -216,7 +227,55 @@ export function Saved({ show }: { show: boolean }) {
   if (!show) return null;
   return <span className="inline-flex items-center gap-1 text-sm font-medium text-accent-deep"><Icon name="check" className="size-4" />{t('common.saved')}</span>;
 }
-export function Loading() { return <p className="py-4 text-sm text-muted">{t('app.loading')}</p>; }
+/** A small turning ring in the current text colour. */
+export function Spinner({ className = 'size-5' }: { className?: string }) {
+  return <span aria-hidden="true" className={`inline-block shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent opacity-80 ${className}`} />;
+}
+
+/** Content on its way: a spinner and a label, plus (`rows`) a few placeholder lines where a list will appear. */
+export function Loading({ label, rows = 0 }: { label?: ReactNode; rows?: number }) {
+  return (
+    <div role="status" aria-live="polite" className="py-4">
+      <p className="flex items-center gap-2 text-sm text-muted"><Spinner className="size-4 text-accent" />{label ?? t('app.loading')}</p>
+      {rows > 0 && (
+        <div aria-hidden="true" className="mt-3 space-y-3">
+          {Array.from({ length: rows }, (_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="skeleton size-9 shrink-0 rounded-xl" />
+              <div className="flex-1 space-y-1.5"><div className="skeleton h-3.5" style={{ width: `${70 - (i % 3) * 15}%` }} /><div className="skeleton h-3 w-1/3" /></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The AI is reading or writing: an animated card that says so, for waits of several seconds. */
+export function AiThinking({ title, hint }: { title: ReactNode; hint?: ReactNode }) {
+  return (
+    <div role="status" aria-live="polite" className="ai-sweep flex items-start gap-3 rounded-xl bg-lilac-tint px-3 py-3 text-lilac-deep">
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-white/70"><span className="ai-dots"><span /><span /><span /></span></span>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold">{title}</div>
+        {hint && <div className="mt-0.5 text-xs opacity-80">{hint}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** A thin bar along the top while any request is out longer than a moment (quick ones do not flash it). */
+export function LoadingBar() {
+  const [n, setN] = useState(0);
+  const [show, setShow] = useState(false);
+  useEffect(() => onRequestsInFlight(setN), []);
+  useEffect(() => {
+    if (n === 0) { setShow(false); return; }
+    const id = setTimeout(() => setShow(true), 250);
+    return () => clearTimeout(id);
+  }, [n > 0]);
+  return show ? <div className="loadbar" role="progressbar" aria-label={t('app.loading')} /> : null;
+}
 export function Empty({ children }: { children?: ReactNode }) {
   return <p className="py-8 text-center text-sm text-muted">{children ?? t('common.empty')}</p>;
 }
@@ -252,7 +311,7 @@ export function SecretInput({ label, configured, onSave, multiline }: {
         {multiline
           ? <textarea aria-label={label} className={`${inputCls} ltr h-20 font-mono text-xs`} value={v} onChange={(e) => setV(e.target.value)} autoComplete="off" spellCheck={false} />
           : <input aria-label={label} type="password" className={`${inputCls} ltr`} value={v} onChange={(e) => setV(e.target.value)} autoComplete="new-password" />}
-        <Button variant="secondary" disabled={!v.trim() || a.busy} onClick={save}>{a.busy ? t('common.saving') : t('common.save')}</Button>
+        <Button variant="secondary" disabled={!v.trim()} onClick={save}>{a.busy ? t('common.saving') : t('common.save')}</Button>
       </div>
       <p className={hintCls}>{t('common.writeOnlyHint')}</p>
       <ErrorText>{a.error}</ErrorText>

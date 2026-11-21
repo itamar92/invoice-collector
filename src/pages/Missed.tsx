@@ -17,7 +17,7 @@ export default function Missed() {
   const doIt = (r: MissedRow, what: 'queue' | 'hide') => act.run(async () => {
     if (what === 'queue') await api.queueMissed(r.messageId); else await api.hideMissed(r.messageId);
     await list.reload(); await refreshSummary();
-  });
+  }, `${what}:${r.messageId}`);
 
   return (
     <div className="space-y-4">
@@ -30,7 +30,7 @@ export default function Missed() {
         </label>
       }>
         <ErrorText>{act.error}</ErrorText>
-        {list.loading && !list.data ? <Loading /> : list.error ? <ErrorText>{list.error}</ErrorText> : rows.length === 0 ? <Empty /> : (
+        {list.loading && !list.data ? <Loading rows={4} /> : list.error ? <ErrorText>{list.error}</ErrorText> : rows.length === 0 ? <Empty /> : (
           <ul>
             {rows.map((r) => (
               <li key={r.messageId} className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 ${rowCls}`}>
@@ -43,8 +43,8 @@ export default function Missed() {
                 </div>
                 {r.status === 'open' && (
                   <div className="flex gap-2">
-                    <Button disabled={act.busy} onClick={() => doIt(r, 'queue')}>{t('missed.queue')}</Button>
-                    <Button variant="secondary" disabled={act.busy} onClick={() => doIt(r, 'hide')}>{t('missed.hide')}</Button>
+                    <Button loading={act.is(`queue:${r.messageId}`)} disabled={act.busy} onClick={() => doIt(r, 'queue')}>{t('missed.queue')}</Button>
+                    <Button variant="secondary" loading={act.is(`hide:${r.messageId}`)} disabled={act.busy} onClick={() => doIt(r, 'hide')}>{t('missed.hide')}</Button>
                   </div>
                 )}
               </li>

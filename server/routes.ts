@@ -18,7 +18,7 @@ import {
   getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
 import type { Item } from './core/items.js';
-import { FolderNotFoundError } from './core/types.js';
+import { FolderConflictError, FolderNotFoundError } from './core/types.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { getDb } from './db.js';
@@ -85,6 +85,7 @@ const FieldsPatch = z.object({
   allocationNumber: z.string().nullable(),
   description: z.string().nullable(),
   category: z.string().nullable(),
+  vatConfirmed: z.boolean(),
 }).partial().strict();
 
 const ListQuery = z.object({
@@ -201,7 +202,8 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.get('/items/:id', wrap((req, res) => {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
-    res.json({ ...item, events: eventsOf(item.id), emailMode: getEmail(item.messageId)?.mode ?? null });
+    const { text, ...rest } = item;
+    res.json({ ...rest, hasText: !!text?.trim(), events: eventsOf(item.id), emailMode: getEmail(item.messageId)?.mode ?? null });
   }));
 
   r.get('/items/:id/pdf', wrap((req, res) => {
@@ -469,6 +471,24 @@ export function apiRouter(ctx: ApiContext): express.Router {
       res.json({ path, folders: await storage.listFolders(path) });
     } catch (e) {
       if (e instanceof FolderNotFoundError) throw new HttpError(404, 'folder_not_found');
+      throw new HttpError(502, 'dropbox_unavailable');
+    }
+  }));
+
+  // A new folder from the folder browser: one name inside the folder being browsed.
+  const NewFolder = z.object({
+    parent: z.string().max(1000).default(''),
+    name: z.string().trim().min(1).max(255).refine((n) => !/[\\/:*?"<>|]/.test(n) && n !== '.' && n !== '..' && !/[. ]$/.test(n)),
+  }).strict();
+  r.post('/dropbox/folders', wrap(async (req, res) => {
+    const { parent, name } = parse(NewFolder, req.body);
+    const { storage } = live().deps;
+    if (!storage.createFolder) throw new HttpError(503, 'not_connected');
+    try {
+      res.status(201).json({ folder: await storage.createFolder(parent, name) });
+    } catch (e) {
+      if (e instanceof FolderNotFoundError) throw new HttpError(404, 'folder_not_found');
+      if (e instanceof FolderConflictError) throw new HttpError(409, 'folder_conflict');
       throw new HttpError(502, 'dropbox_unavailable');
     }
   }));

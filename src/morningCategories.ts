@@ -23,3 +23,18 @@ export function mergeMorningCategories(cats: Category[], items: MorningClassific
   }
   return { cats: out, added };
 }
+
+/**
+ * Morning's categories only: the list becomes one category per Morning classification, linked to it, and every
+ * other category is dropped. A category that already carried one of these names or links keeps its
+ * "send to accounting" choice. Returns the new list and how many were dropped.
+ */
+export function replaceWithMorningCategories(cats: Category[], items: MorningClassification[]): { cats: Category[]; removed: number } {
+  const linked = mergeMorningCategories([], items).cats;
+  const out = linked.map((m) => {
+    const before = cats.find((c) => c.accountingClassification === m.accountingClassification) ?? cats.find((c) => c.name.trim() === m.name);
+    return before ? { ...m, sendToAccounting: before.sendToAccounting } : m;
+  });
+  const kept = new Set(out.map((c) => c.name));
+  return { cats: out, removed: cats.filter((c) => !kept.has(c.name.trim())).length };
+}

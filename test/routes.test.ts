@@ -200,6 +200,21 @@ test('manual field edit on a needs_attention item re-validates and moves it to r
   assert.equal(getItem(id)!.provenance, 'manual');
 });
 
+test('approving a VAT that does not add up lets the item through; the detail no longer sends the text', async () => {
+  businessVendor();
+  const id = item('needs_attention', { total: 236, vat: 50, net: 186 });
+  const { call } = await boot();
+  const first = (await (await call('PUT', `/api/items/${id}/fields`, { docNumber: '7' })).json()) as any;
+  assert.deepEqual(first.problems, ['vat_mismatch']);
+  const ok = (await (await call('PUT', `/api/items/${id}/fields`, { vatConfirmed: true })).json()) as any;
+  assert.equal(ok.valid, true);
+  assert.equal(ok.item.state, 'ready');
+  assert.equal(getItem(id)!.fields!.vatConfirmed, true);
+  const detail = (await (await call('GET', `/api/items/${id}`)).json()) as any;
+  assert.equal(detail.text, undefined);
+  assert.equal(typeof detail.hasText, 'boolean');
+});
+
 test('fixing an item that has no vendor yet routes it through the vendor decision, not straight to filing', async () => {
   const id = item('needs_attention', { vendorName: null, total: null, vat: null, net: null }, 'nv');
   assert.equal(getItem(id)!.vendorKey, null);
@@ -430,6 +445,28 @@ test('GET /api/dropbox/folders lists one level; 404 for a missing folder, 502 on
   assert.deepEqual(await r.json(), { error: 'dropbox_unavailable' });
   const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
   assert.equal((await off.call('GET', '/api/dropbox/folders')).status, 503);
+});
+
+test('POST /api/dropbox/folders creates one folder; bad names 400, a file of that name 409', async () => {
+  const { FolderConflictError } = await import('../server/core/types.js');
+  const made: [string, string][] = [];
+  const withCreate = (fn: (p: string, n: string) => Promise<{ name: string; path: string }>) => () => {
+    const d = deps();
+    return { deps: { ...d, storage: { ...d.storage, createFolder: fn } }, gmail };
+  };
+  const { call } = await boot({ getDeps: withCreate(async (p, n) => { made.push([p, n]); return { name: n, path: `${p}/${n}` }; }) });
+  const ok = await call('POST', '/api/dropbox/folders', { parent: '/מסמכים', name: ' קבלות ' });
+  assert.equal(ok.status, 201);
+  assert.deepEqual(await ok.json(), { folder: { name: 'קבלות', path: '/מסמכים/קבלות' } });
+  assert.deepEqual(made, [['/מסמכים', 'קבלות']]);
+  for (const name of ['a/b', '..', 'x.', '', 'a:b']) {
+    assert.equal((await call('POST', '/api/dropbox/folders', { parent: '', name })).status, 400, name);
+  }
+  assert.equal(made.length, 1);
+  const clash = await boot({ getDeps: withCreate(async (p) => { throw new FolderConflictError(p); }) });
+  assert.equal((await clash.call('POST', '/api/dropbox/folders', { name: 'a.pdf' })).status, 409);
+  const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
+  assert.equal((await off.call('POST', '/api/dropbox/folders', { name: 'x' })).status, 503);
 });
 
 test('GET /api/gmail/labels lists labels from the live Gmail source; 503 when not connected or unsupported', async () => {

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildFilename, buildFolder } from '../../server/core/naming.js';
 import { api, GMAIL_SEND_SCOPE, startOAuth } from '../api.js';
-import { mergeMorningCategories } from '../morningCategories.js';
+import { replaceWithMorningCategories } from '../morningCategories.js';
 import { FolderPicker } from './FolderPicker.js';
 import type { Category, ExtractedFields, MorningClassification, SecretKey, Settings } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
-import { Button, Check, ErrorText, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp, useLoad } from './ui.js';
+import { Button, Check, ErrorText, Spinner, Field, hintCls, Icon, inputCls, Notice, rowCls, Saved, SecretInput, td, th, useAction, useApp, useLoad } from './ui.js';
 
 /** Shared by Setup (one step each) and Settings (all of them, editable later). */
 
@@ -32,7 +32,7 @@ function ConnectRow({ name, hint, ok, onConnect }: { name: string; hint: string;
         <p className={hintCls}>{hint}</p>
         <ErrorText>{a.error}</ErrorText>
       </div>
-      <Button variant={ok ? 'secondary' : 'primary'} disabled={a.busy} onClick={() => a.run(onConnect)}>
+      <Button variant={ok ? 'secondary' : 'primary'} loading={a.busy} onClick={() => a.run(onConnect)}>
         {ok ? t('connect.reconnect') : t('connect.connect')}
       </Button>
     </div>
@@ -76,7 +76,7 @@ export function ConnectionsSection() {
           <SecretInput label={t('connect.morningId')} configured={secrets.morning_id} onSave={(v) => saveSecret('morning_id', v)} />
           <SecretInput label={t('connect.morningSecret')} configured={secrets.morning_secret} onSave={(v) => saveSecret('morning_secret', v)} />
         </div>
-        <Button variant="secondary" disabled={detect.busy || !secrets.morning_id || !secrets.morning_secret} onClick={runDetect}>
+        <Button variant="secondary" loading={detect.busy} disabled={!secrets.morning_id || !secrets.morning_secret} onClick={runDetect}>
           {detect.busy ? t('connect.detecting') : t('connect.detect')}
         </Button>
         <ErrorText>{detect.error}</ErrorText>
@@ -189,8 +189,8 @@ export function AiSection() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={!dirty || saving.busy || (mode === 'ssh' && !sshValid)} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
-        {mode !== 'none' && <Button variant="secondary" disabled={dirty || test.busy} onClick={doTest}>{test.busy ? t('ai.testing') : t('ai.test')}</Button>}
+        <Button loading={saving.busy} disabled={!dirty || (mode === 'ssh' && !sshValid)} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+        {mode !== 'none' && <Button variant="secondary" disabled={dirty} onClick={doTest}>{test.busy ? t('ai.testing') : t('ai.test')}</Button>}
         <Saved show={saved && !dirty} />
       </div>
       {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.text}</Notice>}
@@ -262,7 +262,7 @@ export function LabelSection() {
       </fieldset>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={!canSave || saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+        <Button disabled={!canSave} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         <span className="text-sm text-muted">{current ? t('label.current', { label: current }) : t('label.currentAll')}</span>
       </div>
       <ErrorText>{saving.error}</ErrorText>
@@ -328,12 +328,13 @@ export function CategoriesSection() {
   const names = cats.map((c) => c.name.trim());
   const valid = names.every(Boolean) && new Set(names).size === names.length && folderT.trim() && fileT.trim();
   const setCat = (i: number, patch: Partial<Category>) => { setCats(cats.map((c, j) => (j === i ? { ...c, ...patch } : c))); setSaved(false); };
-  const [fromMorning, setFromMorning] = useState<number | null>(null);
+  const [fromMorning, setFromMorning] = useState<{ removed: number; total: number } | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const useMorning = () => {
     if (morning.list.state !== 'ok') return;
-    const r = mergeMorningCategories(cats, morning.list.items);
-    setCats(r.cats); setFromMorning(r.added); setSaved(false);
+    if (cats.length > 0 && !window.confirm(t('cat.fromMorning.confirm', { n: morning.list.items.length }))) return;
+    const r = replaceWithMorningCategories(cats, morning.list.items);
+    setCats(r.cats); setFromMorning({ removed: r.removed, total: r.cats.length }); setSaved(false);
   };
   const add = () => { if (!newName.trim() || names.includes(newName.trim())) return; setCats([...cats, { name: newName.trim(), sendToAccounting: true }]); setNewName(''); setSaved(false); };
 
@@ -356,9 +357,7 @@ export function CategoriesSection() {
           <p className={hintCls}>{t('cat.fromMorning.hint', { n: morning.list.items.length })}</p>
           <Button variant="secondary" className="bg-white" onClick={useMorning}>{t('cat.fromMorning.button')}</Button>
           {fromMorning !== null && (
-            <Notice tone={fromMorning > 0 ? 'ok' : 'info'}>
-              {fromMorning > 0 ? t('cat.fromMorning.added', { n: fromMorning }) : t('cat.fromMorning.none')}
-            </Notice>
+            <Notice tone="ok">{t('cat.fromMorning.replaced', { n: fromMorning.total, removed: fromMorning.removed })}</Notice>
           )}
         </div>
       )}
@@ -384,7 +383,7 @@ export function CategoriesSection() {
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
         {morning.list.state === 'off' && <span>{t('cat.classificationsNeedMorning')}</span>}
-        {morning.list.state === 'loading' && <span>{t('cat.classificationsLoading')}</span>}
+        {morning.list.state === 'loading' && <span className="inline-flex items-center gap-1.5"><Spinner className="size-3.5 text-accent" />{t('cat.classificationsLoading')}</span>}
         {morning.list.state === 'error' && <span className="rounded-lg bg-warn-tint px-2 py-1 text-ink">{t('cat.classificationsUnavailable')}</span>}
         {morning.list.state !== 'off' && (
           <Button variant="ghost" disabled={morning.list.state === 'loading'} onClick={() => void morning.reload()}>{t('cat.classificationsRefresh')}</Button>
@@ -423,7 +422,7 @@ export function CategoriesSection() {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Button disabled={!valid || saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+        <Button disabled={!valid} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
@@ -453,7 +452,7 @@ export function GeneralSection() {
         <Field label={t('settings.timezone')}><input className={`${inputCls} ltr`} value={f.timezone} onChange={set('timezone')} /></Field>
       </div>
       <div className="flex items-center gap-2">
-        <Button disabled={saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+        <Button loading={saving.busy} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
@@ -519,7 +518,7 @@ function SharedBot() {
           <div className="flex flex-wrap items-center gap-2">
             {link
               ? <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-accent px-4 text-sm font-semibold text-white hover:bg-accent-deep"><Icon name="out" />{t('telegram.open')}</a>
-              : <Button disabled={connect.busy} onClick={start}>{connect.busy ? t('telegram.connecting') : t('telegram.connect')}</Button>}
+              : <Button loading={connect.busy} onClick={start}>{connect.busy ? t('telegram.connecting') : t('telegram.connect')}</Button>}
           </div>
           {link && <p className={hintCls}>{t('telegram.openHint')}</p>}
           <ErrorText>{connect.error}</ErrorText>
@@ -528,7 +527,7 @@ function SharedBot() {
       <Field label={t('telegram.relayUrl')} hint={t('telegram.relayUrlHint')}>
         <div className="flex gap-2">
           <input className={`${inputCls} ltr`} inputMode="url" placeholder="https://" value={addr} onChange={(e) => { setAddr(e.target.value); setSaved(false); }} />
-          <Button variant="secondary" disabled={saving.busy || addr.trim() === url} onClick={saveAddr}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
+          <Button variant="secondary" loading={saving.busy} disabled={addr.trim() === url} onClick={saveAddr}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         </div>
       </Field>
       <Saved show={saved} />
@@ -565,7 +564,7 @@ export function TelegramSection() {
         <p className={hintCls}>{t('telegram.ownHint')}</p>
         <SecretInput label={t('telegram.token')} configured={s.secrets.telegram_bot_token} onSave={(v) => saveSecret('telegram_bot_token', v)} />
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" className="bg-white" disabled={test.busy || !s.secrets.telegram_bot_token} onClick={runTest}>
+          <Button variant="secondary" className="bg-white" loading={test.busy} disabled={!s.secrets.telegram_bot_token} onClick={runTest}>
             {test.busy ? t('telegram.testing') : t('telegram.test')}
           </Button>
           {bot !== null && <span className="text-sm font-medium text-accent-deep">{t('telegram.testOk')} <bdi className="ltr">{bot}</bdi></span>}
