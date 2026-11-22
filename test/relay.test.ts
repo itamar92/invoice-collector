@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -36,7 +37,7 @@ const ctx = { getDeps: deps, now: () => NOW };
 
 const servers: Server[] = [];
 after(() => { for (const s of servers) s.close(); });
-beforeEach(() => { openDb(':memory:'); resetLoginLimiter(); });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); resetLoginLimiter(); });
 
 /** A hub with a fake Telegram behind it, served over real HTTP. */
 async function bootHub(over: Partial<HubOptions> = {}, tg: Partial<TelegramApi> = {}) {
@@ -163,7 +164,7 @@ test('instance API: connect registers once and returns the link; changing the hu
   const s = await new Promise<Server>((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
   servers.push(s);
   const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
-  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'correct horse' }) });
+  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'correct horse' }) });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await fetch(`${base}${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });

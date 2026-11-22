@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -31,7 +32,7 @@ const FIELDS: ExtractedFields = {
 
 const servers: Server[] = [];
 after(() => { for (const s of servers) s.close(); });
-beforeEach(() => { openDb(':memory:'); resetLoginLimiter(); });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); resetLoginLimiter(); });
 
 /** An AI that reads PDFs and answers with FIELDS; records what it was sent. */
 function fakeAi(calls: AiRequest[] = []): AiProvider {
@@ -52,7 +53,7 @@ async function boot(over: Partial<ApiContext> = {}) {
   servers.push(s);
   const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
   const login = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'correct horse' }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'correct horse' }),
   });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   const upload = (body: Buffer, type: string, name = 'receipt.jpg', auth = true) =>

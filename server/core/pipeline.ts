@@ -10,7 +10,7 @@ import {
 import { buildFilename, buildFolder } from './naming.js';
 import { PdfError, extractPdfText } from './pdfText.js';
 import { matchesRecipe, runRecipe, type Recipe } from './recipe.js';
-import { findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
+import { adoptSharedRecipe, findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
 import { TransientError } from './types.js';
 import type { Deps, ExtractedFields, ItemState, Provenance, Reason } from './types.js';
 import { validateFields, type Problem } from './validate.js';
@@ -208,7 +208,8 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   const uploaded = isUploadId(item.messageId);
   const sender = uploaded ? '' : bareAddress(getEmail(item.messageId)?.sender ?? '');
   const today = localDate(deps);
-  let recipe = findRecipe(sender, doc.text);
+  // Own recipes first; else one another user's AI already wrote for this vendor (saves the AI call).
+  let recipe = findRecipe(sender, doc.text) ?? adoptSharedRecipe(sender, doc.text);
 
   let vendorKey: string | null = null;
   let displayName = '';

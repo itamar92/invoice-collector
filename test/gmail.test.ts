@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -23,7 +24,7 @@ process.env.PUBLIC_URL = 'https://ic.example.test';
 process.env.GOOGLE_CLIENT_ID = 'gid';
 process.env.GOOGLE_CLIENT_SECRET = 'gsecret';
 
-beforeEach(() => { openDb(':memory:'); setSecret('gmail_refresh', 'RT'); });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); setSecret('gmail_refresh', 'RT'); });
 
 const pdf = (s: string) => Buffer.from(`%PDF-1.4 ${s}`);
 const msg = (id: string, over: Partial<GmailMessage> = {}): GmailMessage => ({
@@ -334,7 +335,7 @@ async function start() {
   return `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
 }
 async function loginCookie(base: string) {
-  const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'pw' }) });
+  const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'pw' }) });
   return (r.headers.get('set-cookie') ?? '').split(';')[0];
 }
 

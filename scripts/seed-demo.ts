@@ -23,7 +23,11 @@ const dataDir = path.resolve(process.env.DATA_DIR || './data-demo');
 if (!path.basename(dataDir).includes('demo')) throw new Error(`refusing to seed ${dataDir}: folder name must contain "demo"`);
 fs.mkdirSync(dataDir, { recursive: true });
 const dbFile = path.join(dataDir, 'app.db');
-for (const f of [dbFile, `${dbFile}-wal`, `${dbFile}-shm`]) fs.rmSync(f, { force: true });
+// accounts.db too: the server recreates the owner account (login "admin" + APP_PASSWORD) on the fresh app.db.
+for (const base of [dbFile, path.join(dataDir, 'accounts.db')]) {
+  for (const f of [base, `${base}-wal`, `${base}-shm`]) fs.rmSync(f, { force: true });
+}
+fs.rmSync(path.join(dataDir, 'tenants'), { recursive: true, force: true });
 openDb(dbFile);
 
 const year = new Date().getFullYear();

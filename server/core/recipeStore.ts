@@ -2,9 +2,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDb } from '../db.js';
 import { compileRecipe, matchesRecipe, RecipeError, senderMatches, unsafeAiMatch, type Recipe } from './recipe.js';
+import { findShared, noteAdopted, publishShared } from './sharedRecipes.js';
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
-export type RecipeSource = 'starter' | 'ai' | 'user';
+/** 'shared': copied from the library another user's AI (or edit) contributed to. */
+export type RecipeSource = 'starter' | 'ai' | 'user' | 'shared';
 
 export interface Vendor {
   key: string;
@@ -95,7 +97,7 @@ export function saveRecipe(r: Recipe, source: RecipeSource): number {
     if (problems.length) throw new RecipeError(`unsafe match: ${problems.join('; ')}`);
   }
   const db = getDb();
-  return db.transaction(() => {
+  const id = db.transaction(() => {
     upsertVendor(recipe.vendorKey, recipe.displayName);
     const last = db.prepare('SELECT COALESCE(MAX(version), 0) FROM recipes WHERE vendor_key = ?').pluck().get(recipe.vendorKey) as number;
     db.prepare('UPDATE recipes SET active = 0 WHERE vendor_key = ?').run(recipe.vendorKey);
@@ -104,6 +106,24 @@ export function saveRecipe(r: Recipe, source: RecipeSource): number {
     ).run(recipe.vendorKey, last + 1, JSON.stringify(recipe), source, new Date().toISOString());
     return Number(info.lastInsertRowid);
   })();
+  // A recipe that was written or fixed here is offered to every other user (a starter or shared one already is).
+  if (source === 'ai' || source === 'user') publishShared(recipe, source);
+  return id;
+}
+
+/**
+ * No recipe of this user's matched: a shared recipe that matches is copied in (source 'shared') and returned,
+ * so the document is read without AI. A vendor this user already has a recipe for keeps their own: that
+ * path (new sender address, AI rewrite) stays as it was.
+ */
+export function adoptSharedRecipe(sender: string, text: string): Recipe | null {
+  const shared = findShared(sender, text);
+  if (!shared) return null;
+  const own = getDb().prepare('SELECT 1 FROM recipes WHERE vendor_key = ? AND active = 1').get(shared.vendorKey);
+  if (own) return null;
+  try { saveRecipe(shared, 'shared'); } catch { return null; }
+  noteAdopted(shared.vendorKey);
+  return getActiveRecipe(shared.vendorKey);
 }
 
 export function recipeHistory(vendorKey: string): { version: number; source: string; createdAt: string; recipe: Recipe }[] {

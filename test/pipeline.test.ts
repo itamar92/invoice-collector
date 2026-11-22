@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb, getDb } from '../server/db.js';
+import { connectDb, openDb, getDb, runAsTenant } from '../server/db.js';
+import { openAccounts } from '../server/accounts.js';
+import { findShared, sharedStats, useSharedRecipes } from '../server/core/sharedRecipes.js';
 import { createEmail, createItem, getItem, transition, updateItem } from '../server/core/items.js';
 import {
   getVendor, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, type VendorStatus,
@@ -999,4 +1001,65 @@ test('AI usage is recorded per document and summed for the first import', async 
   const sum = usageSummary(NOW);
   assert.deepEqual(sum.backfill, u);
   assert.equal(sum.total.calls, u.calls);
+});
+
+// ---------- recipes shared between users ----------
+
+test('shared recipes: one user\'s AI recipe reads another user\'s first document from that vendor, no AI call', async () => {
+  useSharedRecipes(openAccounts(':memory:'));
+  try {
+    const alice = { id: 'alice', db: connectDb(':memory:') };
+    const bob = { id: 'bob', db: connectDb(':memory:') };
+
+    // Alice: unknown vendor, AI reads it and writes a recipe, which is published.
+    const ai = fakeAi();
+    await runAsTenant(alice, async () => {
+      const { id } = newItem(invoiceText());
+      await processItem(id, deps({ ai }));
+      assert.equal(getItem(id)!.provenance, 'ai');
+    });
+    assert.equal(ai.recipeCalls, 1);
+    const shared = findShared('billing@acme.example', invoiceText());
+    assert.ok(shared, 'published');
+    assert.equal(shared.fields.category, undefined, 'category names are personal and never shared');
+
+    // Bob: same vendor, a different invoice. No AI configured at all, yet it is read by the shared recipe.
+    await runAsTenant(bob, async () => {
+      const { id } = newItem(invoiceText({ num: '2002', total: '58.50' }));
+      await processItem(id, deps({ ai: null }));
+      const it = getItem(id)!;
+      assert.equal(it.provenance, 'recipe');
+      assert.equal(it.fields?.docNumber, '2002');
+      assert.equal(it.fields?.total, 58.5);
+      assert.equal(it.state, 'needs_attention'); // no category yet: Bob picks his own
+      assert.equal(recipeHistory(it.vendorKey!)[0]!.source, 'shared');
+      assert.equal(getVendor(it.vendorKey!)!.status, 'unreviewed'); // business/personal stays Bob's decision
+    });
+    assert.equal(ai.extractCalls, 1, 'Bob used no AI');
+    assert.equal(sharedStats().adopted, 1);
+    // Bob's copy is a 'shared' recipe: it is not published back.
+    assert.equal(sharedStats().recipes, 1);
+  } finally { useSharedRecipes(null); }
+});
+
+test('shared recipes: a user\'s own recipe for the vendor wins; unsafe or aiAlways recipes are not shared', async () => {
+  useSharedRecipes(openAccounts(':memory:'));
+  try {
+    saveRecipe(layoutRecipe('acme', 'billing@acme.example', { aiAlways: true }), 'ai');
+    saveRecipe(layoutRecipe('gm', 'someone@gmail.com'), 'user');
+    assert.equal(sharedStats().recipes, 0);
+    saveRecipe(layoutRecipe('acme', 'billing@acme.example'), 'user');
+    assert.equal(sharedStats().recipes, 1);
+
+    const carol = { id: 'carol', db: connectDb(':memory:') };
+    runAsTenant(carol, () => {
+      saveRecipe(layoutRecipe('acme', 'old@acme.example', { displayName: 'Carol acme' }), 'starter');
+    });
+    await runAsTenant(carol, async () => {
+      const { id } = newItem(invoiceText());
+      await processItem(id, deps({ ai: null }));
+      assert.equal(getItem(id)!.reason, 'no_recipe_no_ai'); // her own acme recipe is kept, not replaced
+      assert.equal(recipeHistory('acme').length, 1);
+    });
+  } finally { useSharedRecipes(null); }
 });

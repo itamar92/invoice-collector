@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -17,7 +18,7 @@ process.env.API_TOKEN = 'test-api-token-synthetic';
 
 const servers: Server[] = [];
 after(() => { for (const s of servers) s.close(); });
-beforeEach(() => { openDb(':memory:'); resetLoginLimiter(); delete process.env.PUBLIC_URL; });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); resetLoginLimiter(); delete process.env.PUBLIC_URL; });
 
 async function boot() {
   const app = createApp({ getDeps: () => ({ deps: {} as Deps, gmail: {} as GmailSource }), now: () => new Date('2026-06-15T09:00:00Z') });
@@ -25,7 +26,7 @@ async function boot() {
   servers.push(s);
   const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
   const login = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'correct horse' }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'correct horse' }),
   });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   const get = (path: string, headers: Record<string, string> = { authorization: `Bearer ${process.env.API_TOKEN}` }) =>

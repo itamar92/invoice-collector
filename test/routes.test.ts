@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -23,7 +24,7 @@ process.env.APP_PASSWORD = 'correct horse';
 
 const servers: Server[] = [];
 after(() => { for (const s of servers) s.close(); });
-beforeEach(() => { openDb(':memory:'); resetLoginLimiter(); });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); resetLoginLimiter(); });
 
 const deps = (): Deps => ({
   storage: { exists: async () => ({ exists: false, sameContent: false }), put: async (f, n) => ({ path: `${f}/${n}`, existed: false }) },
@@ -38,7 +39,7 @@ async function boot(over: Partial<ApiContext> = {}) {
   servers.push(s);
   const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
   const login = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'correct horse' }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'correct horse' }),
   });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   const call = (method: string, path: string, body?: unknown) =>
