@@ -322,6 +322,7 @@ export function LabelSection() {
           {t('label.link')}<Icon name="out" className="size-4" />
         </a>
       </div>
+      <FilterSuggestion />
 
       <fieldset className="space-y-2">
         <label className="flex min-h-8 items-center gap-2 text-sm font-semibold">
@@ -355,6 +356,83 @@ export function LabelSection() {
         <Button disabled={!canSave} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
         <span className="text-sm text-muted">{current ? t('label.current', { label: current }) : t('label.currentAll')}</span>
       </div>
+      <ErrorText>{saving.error}</ErrorText>
+    </div>
+  );
+}
+
+const gmailSearchUrl = (q: string) => `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(q)}`;
+
+/** One Gmail filter built from the invoices the app already found: subject words first, then leftover senders. */
+function FilterSuggestion() {
+  const sug = useLoad(() => api.gmailSuggestions());
+  const [copied, setCopied] = useState(false);
+  const f = sug.data?.filter;
+  if (sug.loading || sug.error) return null;
+  if (!f || !f.query) return <p className={hintCls}>{t('label.suggestEmpty')}</p>;
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(f.query); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+  };
+  return (
+    <div className="space-y-2 rounded-xl bg-ground p-3">
+      <h3 className="text-[13px] font-semibold">{t('label.suggestTitle')}</h3>
+      <p className="text-sm text-muted">{t('label.suggestIntro', { n: f.invoices })}</p>
+      <code dir="ltr" className="block select-all whitespace-pre-wrap break-all rounded-lg border border-line bg-white p-2 text-xs">{f.query}</code>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        {f.subjects.length > 0 && (
+          <div><span className="font-semibold">{t('label.suggestSubjects')}: </span>
+            {f.subjects.map((x) => `${x.term} (${t('label.suggestEmails', { n: x.emails })})`).join(' · ')}</div>
+        )}
+        {f.senders.length > 0 && (
+          <div><span className="font-semibold">{t('label.suggestSenders')}: </span>
+            <span dir="ltr">{f.senders.map((x) => `${x.sender} (${x.emails})`).join(' · ')}</span></div>
+        )}
+      </div>
+      {f.noise > 0 && <p className={hintCls}>{t('label.suggestNoise', { n: f.noise })}</p>}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="secondary" onClick={() => void copy()}>{copied ? t('label.copied') : t('label.copy')}</Button>
+        <a href={gmailSearchUrl(f.query)} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-accent underline">
+          {t('label.tryInGmail')}<Icon name="out" className="size-4" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+const TAX_ID_RE = /^\d{8,9}$/;
+
+/** The owner's own business tax ids: their issued invoices mailed back as copies are never shown or filed. */
+export function OwnBusinessSection() {
+  const { s, save } = useSettings();
+  const current = s.settings.ownTaxIds ?? [];
+  const [text, setText] = useState(current.join(', '));
+  const sug = useLoad(() => api.gmailSuggestions());
+  const saving = useAction();
+  const ids = text.split(/[\s,;]+/).map((x) => x.replace(/\D/g, '')).filter((x) => x !== '');
+  const valid = ids.every((x) => TAX_ID_RE.test(x)) && ids.length <= 5;
+  const dirty = ids.join(',') !== current.join(',');
+  const offers = (sug.data?.ownTaxIds ?? []).filter((o) => !ids.includes(o.taxId));
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">{t('own.intro')}</p>
+      <Field label={t('own.field')} hint={t('own.hint')}>
+        <input className={inputCls} dir="ltr" inputMode="numeric" value={text} onChange={(e) => setText(e.target.value)} />
+      </Field>
+      {offers.length > 0 && (
+        <div className="space-y-1 text-sm">
+          {offers.map((o) => (
+            <div key={o.taxId} className="flex flex-wrap items-center gap-2">
+              <span>{t('own.suggest', { n: o.vendors })}</span>
+              <span className="num font-semibold" dir="ltr">{o.taxId}</span>
+              <Button variant="ghost" onClick={() => setText([...ids, o.taxId].join(', '))}>{t('own.use')}</Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {!valid && <p className="rounded-lg bg-warn-tint px-2 py-1 text-xs">{t('own.invalid')}</p>}
+      <Button disabled={!dirty || !valid || saving.busy} onClick={() => void saving.run(() => save({ ownTaxIds: ids }))}>
+        {saving.busy ? t('common.saving') : t('common.save')}
+      </Button>
       <ErrorText>{saving.error}</ErrorText>
     </div>
   );

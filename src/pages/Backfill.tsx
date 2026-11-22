@@ -56,15 +56,38 @@ export default function Backfill() {
     }, 'finish');
   };
 
+  const [rerunNote, setRerunNote] = useState<string | null>(null);
+  const rerun = () => {
+    if (!window.confirm(t('backfill.rerunConfirm'))) return;
+    setRerunNote(null);
+    void act.run(async () => {
+      const r = await api.rerunBackfill();
+      setPicked(new Set());
+      setFinished(false);
+      setRerunNote(t('backfill.rerunStarted', { items: r.cleared.items }));
+      setSettings(await api.settings());
+      await list.reload();
+      await refreshSummary();
+    }, 'rerun');
+  };
+
   const notConnected = list.code === 'not_connected';
 
   const pickAll = () => setPicked(allPicked ? new Set() : new Set(approvable.map((r) => r.id)));
 
   return (
     <div className="space-y-4">
-      <PageTitle actions={!done && <Button variant="secondary" loading={act.is('finish')} disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}>
+      <PageTitle actions={(
+        <div className="flex flex-wrap gap-2">
+          {!notConnected && (
+            <Button variant="ghost" loading={act.is('rerun')} disabled={act.busy || running} onClick={rerun}>{t('backfill.rerun')}</Button>
+          )}
+          {!done && <Button variant="secondary" loading={act.is('finish')} disabled={act.busy || running || status?.error === 'interrupted'} onClick={finish}>{t('backfill.finish')}</Button>}
+        </div>
+      )}>
         {t('backfill.title')}
       </PageTitle>
+      {rerunNote && <Notice tone="ok">{rerunNote}</Notice>}
       {finished && <Notice tone="ok">{t('backfill.finished')}</Notice>}
       {done && !finished && <Notice>{t('backfill.done')}</Notice>}
       <p className="text-sm text-muted">{t('backfill.intro')}</p>

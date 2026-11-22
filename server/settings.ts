@@ -47,6 +47,8 @@ export type Settings = {
   telegramRelayUrl: string;
   /** Offer recipes written or fixed here to the server's other users (server/core/sharedRecipes.ts). */
   shareRecipes: boolean;
+  /** Tax ids (ע.מ / ח.פ) of the owner's own business: documents it issued are copies, not expenses. */
+  ownTaxIds: string[];
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

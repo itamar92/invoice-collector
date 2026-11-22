@@ -8,6 +8,7 @@ import {
   type Item,
 } from './items.js';
 import { buildFilename, buildFolder } from './naming.js';
+import { isOwnDocument, isZeroTotal, notInvoiceKind } from './notInvoice.js';
 import { PdfError, extractPdfText } from './pdfText.js';
 import { matchesRecipe, runRecipe, type Recipe } from './recipe.js';
 import { adoptSharedRecipe, findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
@@ -201,6 +202,9 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
     throw e;
   }
   setItemText(item.id, doc.text);
+  // A price quote or insurance paper is no expense: dropped before any recipe or AI call is spent on it.
+  const notInvoice = notInvoiceKind(doc.text);
+  if (notInvoice) return moveTo(item.id, 'ignored', undefined, `not_invoice:${notInvoice}`);
   if (doc.isScan && !ai) return moveTo(item.id, 'needs_attention', 'unreadable_pdf', 'scanned pdf, no ai');
   if (doc.isScan && !ai?.supportsPdf) return moveTo(item.id, 'needs_attention', 'scan_needs_api_ai');
 
@@ -228,6 +232,12 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
     }
     if (!recipe.aiAlways) {
       const f = runRecipe(recipe, doc.text);
+      // A 0 total is a real reading of a free-plan bill, not a recipe failure: no AI call, no attention.
+      if (isZeroTotal(f)) {
+        record(item.id, vendorKey, f, 'recipe', false);
+        if (currentState(item.id) === 'dismissed') return;
+        return moveTo(item.id, 'ignored', undefined, 'not_invoice:zero_total');
+      }
       const v = validateFields(f, settings, today);
       if (v.ok) fields = f;
       else {
@@ -268,6 +278,18 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
       displayName = (fields.vendorName ?? vendorKey ?? '').trim().slice(0, 100);
       writeRecipe = true;
     }
+  }
+
+  // A copy of an invoice the owner issued: kept readable on the item, but no vendor, recipe or filing.
+  if (isOwnDocument(fields, settings)) {
+    setItemFields(item.id, fields, provenance);
+    return moveTo(item.id, 'ignored', undefined, 'not_invoice:own_document');
+  }
+  // Nothing was charged (e.g. a free plan's monthly invoice): not worth the owner's attention.
+  if (isZeroTotal(fields)) {
+    record(item.id, vendorKey, fields, provenance, false);
+    if (currentState(item.id) === 'dismissed') return;
+    return moveTo(item.id, 'ignored', undefined, 'not_invoice:zero_total');
   }
 
   if (vendorKey) ensureVendor(vendorKey, displayName);

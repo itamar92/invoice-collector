@@ -75,6 +75,13 @@ export interface Me {
 }
 export interface AdminUser { id: string; email: string; name: string | null; isAdmin: boolean; disabled: boolean; createdAt: string; hasPassword: boolean; hasGoogle: boolean }
 export interface InviteRow { id: string; email: string | null; createdAt: string; expiresAt: number; usedAt: string | null; usedBy: string | null }
+export interface GmailSuggestions {
+  filter: {
+    query: string; subjects: { term: string; emails: number }[]; senders: { sender: string; emails: number }[];
+    invoices: number; noise: number;
+  };
+  ownTaxIds: { taxId: string; vendors: number }[];
+}
 export interface SettingsResponse { settings: Settings; secrets: Record<SecretKey, boolean>; morningModes: MorningModes | null }
 
 /** A failed API call; `message` is already Hebrew. */
@@ -195,6 +202,8 @@ export const api = {
   approveBackfill: (ids: string[]) => send<{ ok: true }>('POST', '/api/backfill/approve', { ids }),
   skipBackfill: (ids: string[]) => send<{ skipped: number }>('POST', '/api/backfill/skip', { ids }),
   finishBackfill: () => send<{ dismissed: number }>('POST', '/api/backfill/finish'),
+  /** Forgets every document and email, then runs the first import again from scratch (202, background). */
+  rerunBackfill: () => send<{ started: true; cleared: { items: number; emails: number } }>('POST', '/api/backfill/rerun', { confirm: 'rerun' }),
   /** Deletes every document and email so the first import can run again (settings, vendors, recipes stay). */
   resetData: () => send<{ items: number; emails: number; unlabelled: number }>('POST', '/api/reset-data', { confirm: 'reset' }),
 
@@ -222,6 +231,7 @@ export const api = {
   createStorageFolder: (parent: string, name: string) =>
     send<{ folder: { name: string; path: string } }>('POST', '/api/storage/folders', { parent, name }),
   gmailLabels: () => get<{ labels: string[] }>('/api/gmail/labels'),
+  gmailSuggestions: () => get<GmailSuggestions>('/api/gmail/suggestions'),
 };
 
 /**

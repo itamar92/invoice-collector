@@ -1,6 +1,7 @@
 import { getDb } from '../db.js';
 import { getSettings } from '../settings.js';
-import { DONE_LABEL, INVOICE_QUERY, ingestMessage } from '../sources/gmail.js';
+import { DONE_LABEL, ingestMessage, invoiceQuery } from '../sources/gmail.js';
+import { knownVendorSenders } from './recipeStore.js';
 import type { GmailSource } from '../sources/gmail.js';
 import { recordIngestFailure } from './ingestFailures.js';
 import { getEmail, listItems } from './items.js';
@@ -22,7 +23,7 @@ const clean = (s: string) => s.replace(/["\\]/g, '');
 export async function scanMissed(gmail: GmailSource, after: string): Promise<number> {
   const label = getSettings().gmailLabel;
   if (!label) return 0;
-  const q = `${INVOICE_QUERY} -label:"${clean(label)}" -label:"${DONE_LABEL}" after:${after.replaceAll('-', '/')}`;
+  const q = `${invoiceQuery(knownVendorSenders())} -label:"${clean(label)}" -label:"${DONE_LABEL}" after:${after.replaceAll('-', '/')}`;
   const db = getDb();
   const known = db.prepare('SELECT 1 FROM missed WHERE message_id = ?').pluck();
   let added = 0;

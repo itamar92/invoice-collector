@@ -205,7 +205,10 @@ test('query strings: labelled and unlabelled, all pages followed', async () => {
   assert.equal(q(f.calls[1]), 'label:"Invoices" after:2026/01/01 -label:"invoice-collector/done"');
   await gc.listCandidateMessages({ after: '2026/01/01', labelled: false });
   assert.equal(q(f.calls[3]), `${INVOICE_QUERY} after:2026/01/01 -label:"invoice-collector/done"`);
-  assert.equal(INVOICE_QUERY, '(has:attachment filename:pdf OR "חשבונית" OR "קבלה" OR invoice OR receipt) -in:sent -in:chats');
+  assert.match(INVOICE_QUERY, /^\("חשבונית מס" OR "קבלה" OR "tax invoice" OR invoice OR receipt\) /);
+  assert.ok(!INVOICE_QUERY.includes('filename:pdf'), 'a PDF attachment alone is not enough');
+  assert.ok(INVOICE_QUERY.includes('-subject:"הצעת מחיר"') && INVOICE_QUERY.includes('-subject:פוליסה'));
+  assert.ok(INVOICE_QUERY.endsWith('-in:sent -in:chats'));
   assert.equal(getSettings().gmailLabel, 'Invoices');
 });
 
