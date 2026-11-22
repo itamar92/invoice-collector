@@ -5,13 +5,32 @@ import { TransientError } from '../core/types.js';
 import type { Reason } from '../core/types.js';
 import { createEmail, createItem, createPlaceholderItem, getEmail, isTerminal, listItems } from '../core/items.js';
 import { clearIngestFailure } from '../core/ingestFailures.js';
+import { knownVendorSenders } from '../core/recipeStore.js';
 import { ImageError, imageToPdf } from '../core/imagePdf.js';
 import { LinkError, downloadPdf, findInvoiceLinks } from './links.js';
 import type { DownloadOptions } from './links.js';
 import { metaReceiptDocument, parseMetaReceipt } from './meta.js';
 
-export const INVOICE_QUERY =
-  '(has:attachment filename:pdf OR "חשבונית" OR "קבלה" OR invoice OR receipt) -in:sent -in:chats';
+/**
+ * Without a label: only mail that names a tax document (חשבונית מס, חשבונית מס קבלה, קבלה, or the English
+ * invoice/receipt of foreign vendors). Any PDF attachment, or the bare word חשבונית (חשבונית עסקה, proforma),
+ * is not enough. Subjects that announce a price quote or insurance papers are left out.
+ */
+export const NOT_INVOICE_SUBJECTS = [
+  'הצעת מחיר', 'quote', 'quotation', 'proposal',
+  'פוליסה', 'פוליסת', 'מסמכי ביטוח', 'הצעת ביטוח', 'חידוש ביטוח', 'דוח שנתי', 'דיווח שנתי', 'policy',
+];
+const subjectTerm = (s: string) => (s.includes(' ') ? `"${s}"` : s);
+export const NOT_INVOICE_QUERY = NOT_INVOICE_SUBJECTS.map((s) => `-subject:${subjectTerm(s)}`).join(' ');
+const INVOICE_WORDS = '"חשבונית מס" OR "קבלה" OR "tax invoice" OR invoice OR receipt';
+export const INVOICE_QUERY = invoiceQuery([]);
+
+/** The unlabelled search; `senders` (known vendors' addresses or domains) are fetched whatever they say. */
+export function invoiceQuery(senders: string[]): string {
+  const from = senders.map((x) => x.replace(/["\\()\s]/g, '')).filter((x) => x !== '');
+  const any = from.length > 0 ? `${INVOICE_WORDS} OR from:(${from.join(' OR ')})` : INVOICE_WORDS;
+  return `(${any}) ${NOT_INVOICE_QUERY} -in:sent -in:chats`;
+}
 export const DONE_LABEL = 'invoice-collector/done';
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -92,7 +111,7 @@ export class GmailClient implements GmailSource {
       if (!label) throw new Error('gmailLabel is not set');
       q = `label:"${quote(label)}" after:${opts.after}`;
     } else {
-      q = `${INVOICE_QUERY} after:${opts.after}`;
+      q = `${invoiceQuery(knownVendorSenders())} after:${opts.after}`;
     }
     q += ` -label:"${DONE_LABEL}"`;
     return this.searchMessages(q);

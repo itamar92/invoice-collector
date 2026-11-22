@@ -80,6 +80,35 @@ export function findRecipe(sender: string, text: string): Recipe | null {
   return markerOnly;
 }
 
+/** Free mail providers: a `*@` pattern on one of these would pull in everyone's personal mail. */
+export const FREE_MAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'walla.co.il', 'walla.com', 'hotmail.com', 'outlook.com', 'live.com',
+  'yahoo.com', 'icloud.com', 'me.com', 'msn.com', 'aol.com', 'bezeqint.net', 'netvision.net.il', '012.net.il',
+]);
+
+/**
+ * Sender addresses (or bare domains for `*@` patterns) of every active recipe whose vendor is not ignored, for
+ * the unlabelled Gmail search: a known vendor's bill is fetched even when it never says חשבונית מס (חשבון תקופתי).
+ */
+export function knownVendorSenders(limit = 150): string[] {
+  const rows = getDb().prepare(
+    `SELECT r.json FROM recipes r LEFT JOIN vendors v ON v.key = r.vendor_key
+     WHERE r.active = 1 AND (v.status IS NULL OR v.status != 'ignored') ORDER BY r.id`).pluck().all() as string[];
+  const out = new Set<string>();
+  for (const json of rows) {
+    let senders: unknown;
+    try { senders = (JSON.parse(json) as Recipe).match?.senders; } catch { continue; }
+    if (!Array.isArray(senders)) continue;
+    for (const p of senders) {
+      if (typeof p !== 'string') continue;
+      const v = p.trim().toLowerCase().replace(/^\*@/, '');
+      if (!/^[a-z0-9._%+@-]+\.[a-z]{2,}$/.test(v) || FREE_MAIL_DOMAINS.has(v)) continue;
+      out.add(v);
+    }
+  }
+  return [...out].slice(0, limit);
+}
+
 /** The vendor's active recipe, if any. */
 export function getActiveRecipe(vendorKey: string): Recipe | null {
   const json = getDb().prepare('SELECT json FROM recipes WHERE vendor_key = ? AND active = 1 ORDER BY id DESC LIMIT 1')

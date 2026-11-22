@@ -701,6 +701,47 @@ test('reset-data: unlabels marked emails, deletes items and emails, reopens the 
   assert.ok(getVendor(vendor));
 });
 
+test('backfill rerun: needs confirm, wipes documents and emails, starts the import again even after it finished', async () => {
+  const a = item('needs_attention', FIELDS, 'rr');
+  transition(a, 'done');
+  getDb().prepare(`UPDATE emails SET gmail_marked = 1 WHERE message_id = 'm-rr'`).run();
+  updateSettings({ backfillDone: true, backfillStartedAt: '2026-06-01T00:00:00Z' });
+  const unlabelled: string[][] = [];
+  let runs = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((res) => { release = res; });
+  const g = {
+    unmarkHandled: async (ids: string[]) => { unlabelled.push(ids); },
+    listCandidateMessages: async () => { runs++; await gate; return []; },
+  } as unknown as GmailSource;
+  const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+  assert.equal((await post(c, '/api/backfill/rerun', {})).status, 400);
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM items').pluck().get(), 1);
+  const r = await post(c, '/api/backfill/rerun', { confirm: 'rerun' });
+  assert.equal(r.status, 202);
+  assert.deepEqual(await r.json(), { started: true, cleared: { items: 1, emails: 1, unlabelled: 1 } });
+  assert.equal((await post(c, '/api/backfill/rerun', { confirm: 'rerun' })).status, 409);
+  release();
+  await backfillJobDone();
+  assert.equal(runs, 1);
+  assert.deepEqual(unlabelled, [['m-rr']]);
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM items').pluck().get(), 0);
+  const s = getSettings();
+  assert.equal(s.backfillDone, false);
+  assert.ok(s.backfillStartedAt && s.backfillStartedAt !== '2026-06-01T00:00:00Z');
+  assert.deepEqual(s.backfillResult, { emails: 0, items: 0, failed: 0 });
+});
+
+test('gmail suggestions: filter and own tax id candidates from what was read', async () => {
+  const c = await boot();
+  const body = (await (await c.call('GET', '/api/gmail/suggestions')).json()) as any;
+  assert.deepEqual(body.ownTaxIds, []);
+  assert.equal(body.filter.query, '');
+  assert.equal((await c.call('PUT', '/api/settings', { ownTaxIds: ['abc'] })).status, 400);
+  assert.equal((await c.call('PUT', '/api/settings', { ownTaxIds: ['512345678'] })).status, 200);
+  assert.deepEqual(getSettings().ownTaxIds, ['512345678']);
+});
+
 test('reset-data: a Gmail failure deletes nothing', async () => {
   const a = item('needs_attention', FIELDS, 'rf');
   transition(a, 'done');

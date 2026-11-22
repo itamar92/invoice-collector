@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { AccountSection, UsersSection } from '../components/AccountSections.js';
-import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, ResetSection, TelegramSection } from '../components/SettingsSections.js';
+import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, OwnBusinessSection, ResetSection, TelegramSection } from '../components/SettingsSections.js';
 import { ButtonLink, Card, Notice, PageTitle, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import { connectedName } from '../Layout.js';
@@ -12,6 +12,7 @@ const ALL_SECTIONS: { id: string; key: MessageKey; body: () => ReactNode; adminO
   { id: 'connections', key: 'settings.connections', body: () => <ConnectionsSection /> },
   { id: 'ai', key: 'settings.ai', body: () => <AiSection /> },
   { id: 'label', key: 'settings.label', body: () => <LabelSection /> },
+  { id: 'own', key: 'own.title', body: () => <OwnBusinessSection /> },
   { id: 'telegram', key: 'settings.telegram', body: () => <TelegramSection /> },
   { id: 'categories', key: 'settings.categories', body: () => <CategoriesSection /> },
   { id: 'general', key: 'settings.general', body: () => <GeneralSection /> },

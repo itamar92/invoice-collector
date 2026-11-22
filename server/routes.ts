@@ -15,6 +15,8 @@ import {
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
 import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
+import { suggestFilter } from './core/labelSuggest.js';
+import { suggestOwnTaxIds } from './core/notInvoice.js';
 import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { checkRecipe, compileRecipe, RecipeError } from './core/recipe.js';
 import {
@@ -137,6 +139,7 @@ const SettingsPatch = z.object({
   telegramChatIds: z.array(z.string().regex(/^-?\d{1,20}$/)).max(10),
   telegramRelayUrl: z.string().trim().max(300).regex(/^(https?:\/\/[^\s]+)?$/),
   shareRecipes: z.boolean(),
+  ownTaxIds: z.array(z.string().trim().regex(/^\d{8,9}$/)).max(5),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -471,12 +474,8 @@ export function apiRouter(ctx: ApiContext): express.Router {
            SELECT 1 FROM item_events v WHERE v.item_id = i.id AND v.note LIKE 'receipt_of_invoice:%')`).pluck().get() as number,
     });
   }));
-  // Long (every email since 1 January): answers 202 at once and runs in the background; GET /backfill polls it.
-  r.post('/backfill/start', wrap((_req, res) => {
-    const key = jobKey();
-    if (backfillJobs.has(key)) throw new HttpError(409, 'backfill_running');
-    if (getSettings().backfillDone) throw new HttpError(409, 'backfill_done');
-    const { deps, gmail } = live();
+  /** Starts the background run; the caller checked nothing else is running. */
+  const launchBackfill = (key: string, { deps, gmail }: ReturnType<typeof live>) => {
     updateSettings({ backfillFinishedAt: null, backfillResult: null, backfillError: null });
     const done = (patch: Partial<Settings>) => updateSettings({ backfillFinishedAt: clock().toISOString(), ...patch });
     const job = startBackfill(gmail, deps)
@@ -486,7 +485,33 @@ export function apiRouter(ctx: ApiContext): express.Router {
       // Terminal: a throw while recording the outcome must never become an unhandled rejection.
       .catch((e: unknown) => { console.error('backfill outcome not recorded:', e instanceof Error ? e.message : 'error'); });
     backfillJobs.set(key, job);
+  };
+  // Long (every email since 1 January): answers 202 at once and runs in the background; GET /backfill polls it.
+  r.post('/backfill/start', wrap((_req, res) => {
+    const key = jobKey();
+    if (backfillJobs.has(key)) throw new HttpError(409, 'backfill_running');
+    if (getSettings().backfillDone) throw new HttpError(409, 'backfill_done');
+    launchBackfill(key, live());
     res.status(202).json({ started: true });
+  }));
+  // Starts the first import over, whatever happened before: forgets every document and email (as reset-data),
+  // then runs the import again with today's rules. The body must say so explicitly, against stray calls.
+  r.post('/backfill/rerun', wrap(async (req, res) => {
+    parse(z.object({ confirm: z.literal('rerun') }).strict(), req.body);
+    const key = jobKey();
+    if (backfillJobs.has(key)) throw new HttpError(409, 'backfill_running');
+    const ctx = live();
+    backfillJobs.set(key, Promise.resolve()); // holds the slot while the reset runs: a second click gets 409
+    let cleared;
+    try {
+      cleared = await resetData(ctx.gmail);
+    } catch (e) {
+      backfillJobs.delete(key);
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(502, 'gmail_unavailable');
+    }
+    launchBackfill(key, ctx);
+    res.status(202).json({ started: true, cleared });
   }));
   r.post('/backfill/approve', wrap(async (req, res) => {
     const { ids } = parse(Ids, req.body);
@@ -535,6 +560,10 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
 
   // ---------- gmail ----------
+  // What the app read so far, turned into one Gmail filter and the owner's likely business tax id.
+  r.get('/gmail/suggestions', wrap((_req, res) => {
+    res.json({ filter: suggestFilter(), ownTaxIds: suggestOwnTaxIds() });
+  }));
   r.get('/gmail/labels', wrap(async (_req, res) => {
     const { gmail } = live();
     if (!gmail.listLabels) throw new HttpError(503, 'not_connected');

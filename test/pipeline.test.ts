@@ -1091,3 +1091,58 @@ test('shared recipes: opting out stops sharing and withdraws only this user\'s; 
     assert.equal(findShared('billing@acme.example', invoiceText())!.displayName, 'Eli acme', 'newer one kept');
   } finally { useSharedRecipes(null); }
 });
+
+// ---------- not invoices: quotes, insurance papers, the owner's own invoices ----------
+
+test('a price quote or insurance policy is ignored before any recipe or AI call', async () => {
+  const ai = fakeAi();
+  const quote = newItem('Demo Widgets Ltd\nהצעת מחיר 77\nDate: 05/06/2026\nTotal: 117.00');
+  const policy = newItem('ביטוח ישיר\nפוליסה מספר 123456\nתקופת ביטוח 01/01/2026-31/12/2026');
+  assert.equal(await processItem(quote.id, deps({ ai })), 'ignored');
+  assert.equal(await processItem(policy.id, deps({ ai })), 'ignored');
+  assert.equal(ai.extractCalls, 0);
+  assert.ok(notes(quote.id).includes('not_invoice:quote'));
+  assert.ok(notes(policy.id).includes('not_invoice:insurance'));
+});
+
+test('a tax invoice that mentions a quote or a policy number is still processed', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const { id } = newItem(`${invoiceText()}\nחשבונית מס לפי הצעת מחיר 55, פוליסה 9`);
+  assert.equal(await processItem(id, deps()), 'done');
+});
+
+test('a copy of the owner\'s own invoice (their tax id as issuer) is ignored; no vendor is created', async () => {
+  const ai = fakeAi();
+  ai.overrideFields = { vendorName: 'My Studio', vendorTaxId: '012345678' };
+  const { id } = newItem(invoiceText({ vendor: 'My Studio' }), { sender: 'notify@morning.co' });
+  const settings = { ...SETTINGS, ownTaxIds: ['12345678', '012-345-678'] };
+  assert.equal(await processItem(id, deps({ ai, settings })), 'ignored');
+  assert.ok(notes(id).includes('not_invoice:own_document'));
+  assert.equal(getItem(id)!.fields?.vendorTaxId, '012345678');
+  assert.equal(getVendor(vendorKeyFor(getItem(id)!.fields!)!), null);
+  assert.equal(ai.recipeCalls, 0);
+});
+
+test('a zero-total invoice (free plan) is ignored quietly, from a recipe or from the AI', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const viaRecipe = newItem(invoiceText({ total: '0.00' }));
+  const ai = fakeAi();
+  const viaAi = newItem(invoiceText({ total: '0' }), { sender: 'billing@cloud.example' });
+  const st = fakeStorage(); const acc = fakeAccounting();
+  assert.equal(await processItem(viaRecipe.id, deps({ storage: st, accounting: acc, ai })), 'ignored');
+  assert.equal(ai.extractCalls, 0, 'no AI call when the recipe read a 0 total');
+  ai.overrideFields = { total: 0 };
+  assert.equal(await processItem(viaAi.id, deps({ storage: st, accounting: acc, ai })), 'ignored');
+  assert.ok(notes(viaRecipe.id).includes('not_invoice:zero_total'));
+  assert.ok(notes(viaAi.id).includes('not_invoice:zero_total'));
+  assert.equal(st.puts, 0);
+  assert.equal(acc.calls.length, 0);
+  assert.equal(ai.recipeCalls, 0);
+});
+
+test('a zero-total credit note is not treated as a free-plan bill', async () => {
+  const ai = fakeAi();
+  ai.overrideFields = { total: 0, docType: 'credit_note' };
+  const { id } = newItem(invoiceText({ total: '0' }), { sender: 'billing@cloud.example' });
+  assert.notEqual(await processItem(id, deps({ ai })), 'ignored');
+});
