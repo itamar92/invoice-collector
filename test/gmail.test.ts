@@ -286,6 +286,22 @@ test('markHandled creates the label once and only adds it', async () => {
   assert.deepEqual(JSON.parse(String(mods[0].init.body)), { addLabelIds: ['LNEW'] });
 });
 
+test('unmarkHandled removes the done label in one batchModify; no label, no call', async () => {
+  const withLabel = fakeFetch((c) => {
+    if (isToken(c)) return json(200, { access_token: 'AT', expires_in: 3600 });
+    if (c.url.endsWith('/labels')) return json(200, { labels: [{ id: 'LD', name: 'invoice-collector/done' }] });
+    return new Response(null, { status: 204 });
+  });
+  await new GmailClient({ fetchImpl: withLabel.impl }).unmarkHandled(['m1', 'm2']);
+  const mods = withLabel.calls.filter((c) => c.url.endsWith('/messages/batchModify'));
+  assert.equal(mods.length, 1);
+  assert.deepEqual(JSON.parse(String(mods[0].init.body)), { ids: ['m1', 'm2'], removeLabelIds: ['LD'] });
+
+  const noLabel = fakeFetch((c) => (isToken(c) ? json(200, { access_token: 'AT', expires_in: 3600 }) : json(200, { labels: [] })));
+  await new GmailClient({ fetchImpl: noLabel.impl }).unmarkHandled(['m1']);
+  assert.equal(noLabel.calls.filter((c) => c.url.includes('batchModify')).length, 0);
+});
+
 test('listLabels returns user label names, sorted, without the done label or system labels', async () => {
   const f = fakeFetch((c) => {
     if (isToken(c)) return json(200, { access_token: 'AT', expires_in: 3600 });

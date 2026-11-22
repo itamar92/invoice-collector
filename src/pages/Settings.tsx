@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, TelegramSection } from '../components/SettingsSections.js';
+import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, ResetSection, TelegramSection } from '../components/SettingsSections.js';
 import { ButtonLink, Card, Notice, PageTitle, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import { connectedName } from '../Layout.js';
@@ -14,6 +14,7 @@ const SECTIONS: { id: string; key: MessageKey; body: () => ReactNode }[] = [
   { id: 'telegram', key: 'settings.telegram', body: () => <TelegramSection /> },
   { id: 'categories', key: 'settings.categories', body: () => <CategoriesSection /> },
   { id: 'general', key: 'settings.general', body: () => <GeneralSection /> },
+  { id: 'reset', key: 'settings.reset', body: () => <ResetSection /> },
 ];
 
 /** Which section is on screen: the last one whose top has passed the menu. */

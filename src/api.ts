@@ -176,6 +176,8 @@ export const api = {
   approveBackfill: (ids: string[]) => send<{ ok: true }>('POST', '/api/backfill/approve', { ids }),
   skipBackfill: (ids: string[]) => send<{ skipped: number }>('POST', '/api/backfill/skip', { ids }),
   finishBackfill: () => send<{ dismissed: number }>('POST', '/api/backfill/finish'),
+  /** Deletes every document and email so the first import can run again (settings, vendors, recipes stay). */
+  resetData: () => send<{ items: number; emails: number; unlabelled: number }>('POST', '/api/reset-data', { confirm: 'reset' }),
 
   missed: () => get<MissedRow[]>('/api/missed'),
   queueMissed: (id: string) => send<{ ok: true }>('POST', `/api/missed/${enc(id)}/queue`),
