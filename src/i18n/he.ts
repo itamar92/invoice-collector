@@ -123,6 +123,7 @@ export const he = {
   'conn.dropbox': 'Dropbox',
   'conn.gdrive': 'Google Drive',
   'conn.morning': 'Morning',
+  'conn.meta': 'Meta (פייסבוק)',
 
   // common
   'common.save': 'שמירה',
@@ -297,6 +298,7 @@ export const he = {
   'item.readOnly': 'במצב הזה אי אפשר לערוך את הפרטים.',
   'item.aiUsage': 'שימוש ב-AI',
   'item.receiptSetAside': 'זו קבלה על חשבונית מס שכבר קיימת, ולכן היא לא תויקה ולא נספרת כהוצאה.',
+  'item.madeFromEmail': 'את הקבלה המקורית של Meta לא היה אפשר להוריד, אז המסמך הזה נוצר מתוכן המייל של Meta. אפשר להוריד את המקורית ממנהל המודעות ← חיוב.',
   'item.openInvoice': 'לחשבונית',
   'item.keepReceipt': 'בכל זאת לתייק את הקבלה',
   'item.receiptKeptNamed': 'הקבלה תתויק: {name}',
@@ -434,6 +436,8 @@ export const he = {
   'connect.connect': 'חיבור',
   'connect.reconnect': 'חיבור מחדש',
   'connect.morningHint': 'מזהה ומפתח API מתוך Morning ← הגדרות ← כלים למפתחים.',
+  'connect.metaHint': 'קבלות של Meta מגיעות במייל בלי קובץ, והקישור שבהן דורש התחברות לפייסבוק. אם תדביקו כאן את העוגיות (cookies) של פייסבוק מהדפדפן, האפליקציה תוריד את הקבלה המקורית של Meta. בלי זה, או כשההתחברות פגה, נוצר PDF מתוכן המייל ומסומן במסמך. מעתיקים מכלי המפתחים בדפדפן כשמחוברים לפייסבוק (בלשונית Application, תחת Cookies של facebook.com) לפחות את c_user ואת xs.',
+  'connect.metaCookies': 'עוגיות פייסבוק',
   'connect.morningId': 'מזהה API (ID)',
   'connect.morningSecret': 'מפתח API (Secret)',
   'connect.detect': 'בדיקת אפשרויות החיבור',

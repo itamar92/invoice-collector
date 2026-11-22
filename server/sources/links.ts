@@ -18,12 +18,65 @@ function decodeEntities(s: string): string {
   return s.replace(/&amp;/gi, '&').replace(/&#38;/g, '&').replace(/&quot;/gi, '"').replace(/&#39;/g, "'");
 }
 
-/** http(s) links whose URL or anchor text looks like an invoice; deduped, max 5. */
+/**
+ * A vendor whose emailed link opens a viewer page rather than the PDF itself. `apiUrl` maps the viewer link
+ * to the address that actually serves the document; `extract` turns that response into the PDF bytes.
+ */
+interface KnownViewer {
+  name: string;
+  apiUrl(url: URL): string | null;
+  extract(body: Buffer): Buffer;
+}
+
+const KNOWN_VIEWERS: KnownViewer[] = [
+  {
+    // InvoiceOne (invoice-one.com): Akum and other Israeli senders. The viewer page loads the document from
+    // GetPDF, which answers JSON with the PDF base64-encoded in Entity.ArrData. No login needed.
+    name: 'invoice-one',
+    apiUrl(url) {
+      if (!/^(www\.)?invoice-one\.com$/i.test(url.hostname)) return null;
+      const id = url.pathname.match(/\/viewernew\/pages\/(?:Y_)?GreeViewer_document\/([A-Za-z0-9]+)\/?$/i)?.[1];
+      return id ? `https://invoice-one.com/viewernew/api/GreeViewer/Document/GetPDF?DocumentID=${id}` : null;
+    },
+    extract(body) {
+      let data: unknown;
+      try {
+        data = JSON.parse(body.toString('utf8'));
+      } catch {
+        throw new LinkError('link_not_pdf', 'invoice-one: response is not JSON');
+      }
+      const b64 = (data as { Entity?: { ArrData?: unknown } })?.Entity?.ArrData;
+      if (typeof b64 !== 'string' || b64 === '') throw new LinkError('link_not_pdf', 'invoice-one: no document data');
+      return Buffer.from(b64, 'base64');
+    },
+  },
+];
+
+function knownViewer(url: string): { viewer: KnownViewer; apiUrl: string } | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  for (const viewer of KNOWN_VIEWERS) {
+    const apiUrl = viewer.apiUrl(u);
+    if (apiUrl) return { viewer, apiUrl };
+  }
+  return null;
+}
+
+/** http(s) links whose URL or anchor text looks like an invoice; deduped, max 5, known viewers first. */
 export function findInvoiceLinks(html: string, text: string): string[] {
   const found: string[] = [];
+  const known: string[] = [];
   const add = (raw: string, anchor: string) => {
     const url = decodeEntities(raw.trim()).replace(/[)\].,;>]+$/, '');
     if (!/^https?:\/\//i.test(url)) return;
+    if (knownViewer(url)) {
+      if (!known.includes(url)) known.push(url);
+      return;
+    }
     if (DROP.test(url) || DROP.test(anchor)) return;
     if (!KEEP.test(url) && !KEEP.test(anchor)) return;
     if (!found.includes(url)) found.push(url);
@@ -31,7 +84,7 @@ export function findInvoiceLinks(html: string, text: string): string[] {
   const re = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(re)) add(m[1] ?? m[2] ?? '', m[3].replace(/<[^>]*>/g, ' '));
   for (const m of text.matchAll(/https?:\/\/[^\s<>"']+/gi)) add(m[0], '');
-  return found.slice(0, MAX_LINKS);
+  return [...known, ...found].slice(0, MAX_LINKS);
 }
 
 function v4Blocked(a: number[]): boolean {
@@ -89,6 +142,8 @@ export interface DownloadOptions {
   fetchImpl?: typeof fetch;
   maxBytes?: number;
   timeoutMs?: number;
+  /** Extra request headers (e.g. a login cookie), sent only while the URL's host matches `hosts`. */
+  headersFor?: { hosts: RegExp; headers: Record<string, string> };
 }
 
 const defaultResolve = (host: string) => lookup(host, { all: true });
@@ -128,15 +183,18 @@ export async function downloadPdf(url: string, opts: DownloadOptions = {}): Prom
   const signal = AbortSignal.timeout(timeoutMs);
 
   try {
+    // A known viewer link is swapped for the vendor's document address; everything below still applies.
+    const known = knownViewer(url);
     let current: URL;
     try {
-      current = new URL(url);
+      current = new URL(known?.apiUrl ?? url);
     } catch {
       throw new LinkError('link_blocked', 'invalid url');
     }
     for (let hop = 0; ; hop++) {
       await assertSafe(current, resolve);
-      const res = await doFetch(current.toString(), { redirect: 'manual', signal });
+      const extra = opts.headersFor && opts.headersFor.hosts.test(current.hostname) ? opts.headersFor.headers : undefined;
+      const res = await doFetch(current.toString(), { redirect: 'manual', signal, ...(extra ? { headers: extra } : {}) });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get('location');
         await res.body?.cancel().catch(() => {});
@@ -173,7 +231,8 @@ export async function downloadPdf(url: string, opts: DownloadOptions = {}): Prom
           chunks.push(Buffer.from(value));
         }
       }
-      const buf = Buffer.concat(chunks);
+      const raw = Buffer.concat(chunks);
+      const buf = known ? known.viewer.extract(raw) : raw;
       if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new LinkError('link_not_pdf', 'not a PDF');
       return buf;
     }
