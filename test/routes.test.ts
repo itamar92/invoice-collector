@@ -671,6 +671,47 @@ test('backfill start failure is recorded sanitized; a new start clears it', asyn
   assert.equal(((await (await c2.call('GET', '/api/backfill')).json()) as any).error, null);
 });
 
+test('reset-data: unlabels marked emails, deletes items and emails, reopens the first import; keeps vendors', async () => {
+  const vendor = businessVendor();
+  const a = item('needs_attention', FIELDS, 'ra');
+  item('needs_attention', null, 'rb');
+  transition(a, 'done');
+  getDb().prepare(`UPDATE emails SET gmail_marked = 1 WHERE message_id = 'm-ra'`).run();
+  recordIngestFailure('m-x', 'backfill', new Error('boom'));
+  updateSettings({ backfillDone: true, backfillStartedAt: '2026-06-01T00:00:00Z', backfillResult: { emails: 2, items: 2, failed: 0 } });
+  const unlabelled: string[][] = [];
+  const g = { unmarkHandled: async (ids: string[]) => { unlabelled.push(ids); } } as unknown as GmailSource;
+  const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+
+  assert.equal((await post(c, '/api/reset-data', {})).status, 400); // must say so explicitly
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM items').pluck().get(), 2);
+
+  const r = await post(c, '/api/reset-data', { confirm: 'reset' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { items: 2, emails: 2, unlabelled: 1 });
+  assert.deepEqual(unlabelled, [['m-ra']]);
+  for (const tbl of ['items', 'emails', 'item_events', 'ingest_failures', 'missed']) {
+    assert.equal(getDb().prepare(`SELECT COUNT(*) FROM ${tbl}`).pluck().get(), 0, tbl);
+  }
+  const s = getSettings();
+  assert.equal(s.backfillDone, false);
+  assert.equal(s.backfillStartedAt, null);
+  assert.equal(s.backfillResult, null);
+  assert.ok(getVendor(vendor));
+});
+
+test('reset-data: a Gmail failure deletes nothing', async () => {
+  const a = item('needs_attention', FIELDS, 'rf');
+  transition(a, 'done');
+  getDb().prepare(`UPDATE emails SET gmail_marked = 1 WHERE message_id = 'm-rf'`).run();
+  const g = { unmarkHandled: async () => { throw new Error('Gmail 500'); } } as unknown as GmailSource;
+  const c = await boot({ getDeps: () => ({ deps: deps(), gmail: g }) });
+  const r = await post(c, '/api/reset-data', { confirm: 'reset' });
+  assert.equal(r.status, 502);
+  assert.deepEqual(await r.json(), { error: 'gmail_unavailable' });
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM items').pluck().get(), 1);
+});
+
 test('valid manual edit of a backfill item waits for approval; invalid edit of an awaiting item -> needs_attention', async () => {
   businessVendor();
   const id = item('needs_attention', { total: null, vat: null, net: null }, 'bfe');

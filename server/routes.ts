@@ -13,6 +13,7 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
+import { markedEmailIds, resetData } from './core/reset.js';
 import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { checkRecipe, compileRecipe, RecipeError } from './core/recipe.js';
 import {
@@ -494,6 +495,20 @@ export function apiRouter(ctx: ApiContext): express.Router {
     // A run cut short by a restart left emails unread: restart it before ending the first run.
     if (getSettings().backfillError === BACKFILL_INTERRUPTED) throw new HttpError(409, 'backfill_interrupted');
     res.json({ dismissed: finishBackfill() });
+  }));
+
+  // Wipes every document and email (a test run's leftovers) so the first import can run again. Gmail's done label
+  // comes off first; if Gmail fails, nothing is deleted. The body must say so explicitly, against stray calls.
+  r.post('/reset-data', wrap(async (req, res) => {
+    parse(z.object({ confirm: z.literal('reset') }).strict(), req.body);
+    if (backfillJob) throw new HttpError(409, 'backfill_running');
+    const gmail = markedEmailIds().length > 0 ? live().gmail : null;
+    try {
+      res.json(await resetData(gmail));
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(502, 'gmail_unavailable');
+    }
   }));
 
   // ---------- missed ----------

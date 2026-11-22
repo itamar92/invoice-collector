@@ -530,6 +530,32 @@ export function GeneralSection() {
 }
 
 
+// ---------- reset (settings page only) ----------
+/** Clears every document and email (e.g. after a test run) so the first import can run again. */
+export function ResetSection() {
+  const { app } = useSettings();
+  const a = useAction();
+  const [done, setDone] = useState<string | null>(null);
+  const reset = () => {
+    if (!window.confirm(t('reset.confirm'))) return;
+    setDone(null);
+    void a.run(async () => {
+      const r = await api.resetData();
+      setDone(t('reset.done', { items: r.items, emails: r.emails }));
+      await Promise.all([app.refreshSummary(), app.refreshSettings()]);
+    });
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">{t('reset.intro')}</p>
+      <p className={hintCls}>{t('reset.keeps', { label: 'invoice-collector/done' })}</p>
+      <Button variant="danger" loading={a.busy} onClick={reset}>{t('reset.button')}</Button>
+      {done && <Notice tone="ok">{done}</Notice>}
+      <ErrorText>{a.error}</ErrorText>
+    </div>
+  );
+}
+
 // ---------- telegram bot (settings page only) ----------
 /** The shared bot: one tap makes a pairing link; pressing Start in that chat connects it. */
 function SharedBot() {

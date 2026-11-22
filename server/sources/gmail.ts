@@ -37,6 +37,8 @@ export interface GmailSource {
   /** Sender, subject and date only (format=metadata): no body, no attachments. */
   fetchHeaders(id: string): Promise<{ id: string; sender: string; subject: string; receivedAt: string }>;
   markHandled(id: string): Promise<void>;
+  /** Takes the done label off these messages again (reset of test data). Optional: fakes may omit it. */
+  unmarkHandled?(ids: string[]): Promise<void>;
   /** User label names for the setup label picker (optional: fakes may omit it). */
   listLabels?(): Promise<string[]>;
 }
@@ -181,6 +183,19 @@ export class GmailClient implements GmailSource {
     await this.api(`${API}/messages/${encodeURIComponent(id)}/modify`, {
       method: 'POST', json: { addLabelIds: [labelId] },
     });
+  }
+
+  /** Removes the done label from these messages (batchModify, 1000 per call). Nothing to do if the label is gone. */
+  async unmarkHandled(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const list = await this.api(`${API}/labels`);
+    const found = (list?.labels ?? []).find((l: { name: string }) => l.name === DONE_LABEL);
+    if (!found) return;
+    for (let i = 0; i < ids.length; i += 1000) {
+      await this.api(`${API}/messages/batchModify`, {
+        method: 'POST', json: { ids: ids.slice(i, i + 1000), removeLabelIds: [found.id] },
+      });
+    }
   }
 
   async sendMailWithAttachment(to: string, subject: string, filename: string, pdf: Buffer): Promise<string> {
