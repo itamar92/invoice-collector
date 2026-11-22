@@ -2,11 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, onRequestsInFlight } from '../api.js';
-import type { AiUsageTotals, Item, ItemState, SettingsResponse, Summary } from '../api.js';
+import type { AiUsageTotals, Item, ItemState, Me, SettingsResponse, Summary } from '../api.js';
 import { t, tDyn } from '../i18n/he.js';
 
 // ---------- app-wide state ----------
 export interface AppState {
+  /** Who is logged in. */
+  me: Me;
+  setMe: (m: Me) => void;
   summary: Summary | null;
   settings: SettingsResponse | null;
   refreshSummary: () => Promise<void>;

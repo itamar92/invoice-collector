@@ -102,6 +102,15 @@ To stop automatic deploys, disable the workflow (Actions, Deploy, ...) or remove
 4. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, restart, log in,
    and press connect in Settings.
 
+The same client also powers **Sign in with Google** on the login and invite pages (scopes `openid email profile`,
+same redirect URI, nothing extra to register). A Google account signs in only if it matches an existing account
+(by Google id, or by the account's email) or it arrives through an invite link.
+
+**Sharing the instance with friends.** Gmail's `gmail.modify` is a *restricted* scope. Until the app passes
+Google's verification, at most 100 people can connect Gmail, and each one must be listed as a **test user** on
+the consent screen while it is in testing mode (or will see the "unverified app" warning once published).
+Add each friend's Google address there before you send them an invite.
+
 Scopes requested:
 
 | Scope | When |
@@ -315,15 +324,38 @@ Do not expose the container port to the internet. Recommended:
 1. Run `cloudflared` (Cloudflare Tunnel) on the host pointing at `http://127.0.0.1:3100`, and give the tunnel a
    hostname that matches `PUBLIC_URL`.
 2. Add a **Cloudflare Access** application for that hostname with a policy allowing only your own identity.
-   This puts a login in front of the app in addition to `APP_PASSWORD`.
+   This puts a login in front of the app in addition to its own accounts. With friends using the instance,
+   include their identities in the policy too (or rely on the app's own login and skip Access).
 3. The OAuth callbacks are browser redirects made while you are logged in, so they pass through Access normally.
-   If you use the machine API (`/api/v1`, bearer `API_TOKEN`) from outside, add a Cloudflare Access service-token
+   If you use the machine API (`/api/v1`, a bearer token) from outside, add a Cloudflare Access service-token
    policy or a bypass rule limited to that path prefix.
 4. Set `TRUST_PROXY=1` so the app sees the real client IP (used by the login rate limiter).
 
 This is also what provides the HTTPS the app needs (see section 1): `PUBLIC_URL` must be the `https://` hostname of the tunnel.
 
-Keep `APP_PASSWORD` and `API_TOKEN` long and unique, even behind Access.
+Keep passwords and API tokens long and unique, even behind Access.
+
+## Users
+
+The first start creates the **owner** account (login `ADMIN_EMAIL`, or `admin`, with `APP_PASSWORD`) on the
+existing `app.db`, so upgrading a single-user install keeps all its documents, settings and connections.
+In **Settings → Users** the owner creates invite links (valid 7 days, single use, optionally locked to one email)
+and can disable an account (sessions end, data is kept). Each user has their own database file
+(`DATA_DIR/tenants/<id>.db`), their own Gmail, storage, Morning, AI key and Telegram bot, and their own
+background worker; no user can see another's documents. The SSH AI agent (section 5) runs on the server's host,
+so it is available to the owner only. Every user manages their email, password and API token in
+**Settings → My account**.
+
+**Shared recipes.** When one user's AI writes a recipe for a vendor (or a user fixes one by hand), it goes into a
+library every user shares (`shared_recipes` in `accounts.db`). Another user's first document from that vendor is
+then read by that recipe instead of the AI; it is copied into their own recipes (shown as "shared") and works like
+any other: if it fails on a document, their AI rewrites it. What is shared is the matching rule (the vendor's
+sender address or name markers) and the field patterns; never the category, and never a recipe that matches on
+a free-mail address or a generic word, or one set to "always use AI". A user who already has a recipe for that
+vendor keeps their own. The AI is told never to put the recipient's name, address or account number in a recipe. Each user can turn sharing off
+in **Settings → AI** ("Share recipes with other users"): that removes the recipes they shared from the library
+(copies others already took stay with them) and shares nothing new; they still use other users' recipes.
+Turning it back on offers their recipes again, for vendors the library does not have yet.
 
 ## 8. Troubleshooting
 

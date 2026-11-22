@@ -40,7 +40,7 @@ export type ItemDetail = Item & {
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
 export interface Vendor { key: string; displayName: string; status: VendorStatus; defaultCategory: string | null; createdAt: string }
-export interface RecipeVersion { version: number; source: 'starter' | 'ai' | 'user'; createdAt: string; recipe: Record<string, unknown> & { aiAlways?: boolean } }
+export interface RecipeVersion { version: number; source: 'starter' | 'ai' | 'user' | 'shared'; createdAt: string; recipe: Record<string, unknown> & { aiAlways?: boolean } }
 
 export interface BackfillRow {
   id: string; filename: string | null; folder: string | null; vendor: string | null; total: number | null;
@@ -68,6 +68,13 @@ export interface RelayStatus {
   configured: boolean; connected: boolean; botUsername: string | null;
   chats: { id: string; name: string | null; linkedAt: string }[]; error?: string;
 }
+/** The logged-in user (GET /api/me). */
+export interface Me {
+  id: string; email: string; name: string | null; isAdmin: boolean; hasPassword: boolean; hasGoogle: boolean;
+  hasApiToken: boolean; googleLogin: boolean;
+}
+export interface AdminUser { id: string; email: string; name: string | null; isAdmin: boolean; disabled: boolean; createdAt: string; hasPassword: boolean; hasGoogle: boolean }
+export interface InviteRow { id: string; email: string | null; createdAt: string; expiresAt: number; usedAt: string | null; usedBy: string | null }
 export interface SettingsResponse { settings: Settings; secrets: Record<SecretKey, boolean>; morningModes: MorningModes | null }
 
 /** A failed API call; `message` is already Hebrew. */
@@ -125,9 +132,21 @@ const del = <T>(p: string) => request<T>('DELETE', p);
 const enc = encodeURIComponent;
 
 export const api = {
-  login: (password: string) => send<void>('POST', '/api/login', { password }),
+  login: (email: string, password: string) => send<void>('POST', '/api/login', { email, password }),
   logout: () => send<void>('POST', '/api/logout'),
-  me: () => get<{ ok: true }>('/api/me'),
+  me: () => get<Me>('/api/me'),
+  authOptions: () => get<{ google: boolean }>('/api/auth/options'),
+  invite: (token: string) => get<{ email: string | null; google: boolean }>(`/api/invites/${enc(token)}`),
+  acceptInvite: (token: string, body: { email: string; name?: string; password: string }) =>
+    send<Me>('POST', `/api/invites/${enc(token)}/accept`, body),
+  updateAccount: (patch: { email?: string; name?: string | null }) => send<Me>('PUT', '/api/account', patch),
+  changePassword: (current: string | undefined, next: string) => send<void>('POST', '/api/account/password', { current, next }),
+  createApiToken: () => send<{ token: string }>('POST', '/api/account/api-token'),
+  deleteApiToken: () => del<void>('/api/account/api-token'),
+  adminUsers: () => get<{ users: AdminUser[]; invites: InviteRow[] }>('/api/admin/users'),
+  createInvite: (email?: string) => send<{ url: string; expiresAt: number }>('POST', '/api/admin/invites', email ? { email } : {}),
+  revokeInvite: (id: string) => del<void>(`/api/admin/invites/${enc(id)}`),
+  setUserDisabled: (id: string, disabled: boolean) => send<void>('POST', `/api/admin/users/${enc(id)}/disabled`, { disabled }),
   /** `quiet`: the periodic refresh, without the loading bar. */
   summary: (quiet = false) => get<Summary>('/api/summary', quiet),
   stats: (year?: number) => get<Stats>(`/api/stats${year ? `?year=${year}` : ''}`),

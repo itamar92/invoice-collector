@@ -2,7 +2,8 @@
 
 Self-hosted invoice collector. It reads invoices and receipts from Gmail, extracts the fields with per-vendor
 recipes (JSON rules) and an AI fallback, files the PDF in Dropbox or Google Drive, and hands expenses to your accounting system
-(Morning). Single user per instance. Hebrew right-to-left UI; Israeli defaults (VAT 18%, ILS, category names,
+(Morning). One instance serves several users (the owner plus friends invited by link), each with their own
+database, connections and settings; sign in with a password or with Google. Hebrew right-to-left UI; Israeli defaults (VAT 18%, ILS, category names,
 folder and filename conventions) are isolated in `server/defaults/il.ts` and `recipes/il/` and are all
 overridable in Settings.
 
@@ -20,14 +21,14 @@ overridable in Settings.
 ## Quick start (Docker)
 
 ```sh
-cp .env.example .env     # set APP_PASSWORD, SECRET_KEY (openssl rand -hex 32), PUBLIC_URL, ...
+cp .env.example .env     # set APP_PASSWORD, ADMIN_EMAIL, SECRET_KEY (openssl rand -hex 32), PUBLIC_URL, ...
 cp deploy/docker-compose.example.yml docker-compose.yml
 docker compose up -d --build
 ```
 
 Note: the app must be reached over HTTPS (set `PUBLIC_URL` to an `https://` URL, e.g. via a Cloudflare Tunnel). The container runs in production mode, so the login cookie is Secure and login silently fails over plain http; `http://localhost` works in most browsers except Safari.
 
-Then open `PUBLIC_URL`, log in with `APP_PASSWORD`, and connect Gmail and your cloud storage (Dropbox or Google Drive) in Settings.
+Then open `PUBLIC_URL`, log in as `ADMIN_EMAIL` (default `admin`) with `APP_PASSWORD`, and connect Gmail and your cloud storage (Dropbox or Google Drive) in Settings.
 Full instructions (Google OAuth client, Dropbox app or Google Drive, Morning, AI agent, Cloudflare Access):
 [docs/SETUP.md](docs/SETUP.md).
 
@@ -56,6 +57,6 @@ For UI work: run the API (`npm run dev`) and `npm run dev:ui` (Vite on :5173, pr
 SECRET_KEY=any-demo-key APP_PASSWORD=demo PORT=3180 npm run demo   # build, seed ./data-demo, serve on :3180
 ```
 
-Log in with the `APP_PASSWORD` you set. `scripts/seed-demo.ts` recreates `./data-demo/app.db` (it refuses any folder
+Log in as `admin` with the `APP_PASSWORD` you set. `scripts/seed-demo.ts` recreates `./data-demo/app.db` (it refuses any folder
 whose name lacks "demo") with invented vendors, items in every state, a missed-by-label row and an ingest failure.
 The Gmail/Dropbox tokens it stores are fake, so filing fails with a storage error; that is expected.

@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -35,7 +36,7 @@ const tokenOk = (expires = 14400) => json(200, { access_token: 'AT', expires_in:
 const hdr = (c: Call, name: string) => (c.init.headers as Record<string, string>)[name];
 
 beforeEach(() => {
-  openDb(':memory:');
+  openDb(':memory:'); freshAccounts();
   setSecret('dropbox_refresh', 'RT');
 });
 
@@ -159,7 +160,7 @@ async function start() {
   return `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
 }
 async function loginCookie(base: string) {
-  const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'pw' }) });
+  const r = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'pw' }) });
   return (r.headers.get('set-cookie') ?? '').split(';')[0];
 }
 

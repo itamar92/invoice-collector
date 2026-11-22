@@ -37,9 +37,14 @@ export function envProblems(env: Record<string, string | undefined>): string[] {
 
 const STARTER_RECIPES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'recipes', 'il');
 
-/** Opens the database and brings it up to date for this boot. Safe to run on every start. */
-export function initDataStore(dbFile: string, recipesDir = STARTER_RECIPES): void {
-  openDb(dbFile);
+/** Brings the current database (a tenant's, or the default one) up to date for this boot. Safe on every start. */
+export function prepareTenantDb(recipesDir = STARTER_RECIPES): void {
   loadStarterRecipes(recipesDir); // only vendors without any recipe: never replaces a learned or edited one
   markInterruptedBackfill(); // a backfill job lives in memory: one running before this boot was cut short
+}
+
+/** Opens the default database and brings it up to date (scripts and tests; the server uses tenant databases). */
+export function initDataStore(dbFile: string, recipesDir = STARTER_RECIPES): void {
+  openDb(dbFile);
+  prepareTenantDb(recipesDir);
 }

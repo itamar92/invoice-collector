@@ -4,7 +4,7 @@ import { z, ZodError } from 'zod';
 import { AiOutputError, AiUnavailableError, aiWriteRecipe, getAiProvider } from './ai/provider.js';
 import type { AiProvider } from './ai/provider.js';
 import { emptyTotals, itemUsage, usageSummary } from './ai/usage.js';
-import { requireUser } from './auth.js';
+import { currentUser, requireUser } from './auth.js';
 import {
   approveBackfill, BACKFILL_INTERRUPTED, backfillList, finishBackfill, skipBackfill, startBackfill,
 } from './core/backfill.js';
@@ -13,17 +13,18 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
+import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
 import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { checkRecipe, compileRecipe, RecipeError } from './core/recipe.js';
 import {
-  getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
+  getActiveRecipe, getVendor, listVendors, publishOwnRecipes, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
 import type { Item } from './core/items.js';
 import { FolderConflictError, FolderNotFoundError } from './core/types.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
-import { getDb } from './db.js';
+import { currentTenantId, getDb } from './db.js';
 import { detectMorningModes, fetchMorningClassifications, type MorningClassification } from './destinations/morning.js';
 import { chooseStorage } from './destinations/storage.js';
 import { secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
@@ -58,12 +59,13 @@ export interface ApiContext {
 }
 
 /**
- * The one background backfill run (single process). "Running" is this in-memory promise, never a persisted flag,
- * so a restart mid-run cannot leave the UI stuck on "running".
+ * The background backfill run of each tenant (single process; key '' outside any tenant). "Running" is this
+ * in-memory promise, never a persisted flag, so a restart mid-run cannot leave the UI stuck on "running".
  */
-let backfillJob: Promise<void> | null = null;
-/** Resolves when the current background backfill (if any) has finished. For tests and shutdown. */
-export const backfillJobDone = (): Promise<void> => backfillJob ?? Promise.resolve();
+const backfillJobs = new Map<string, Promise<void>>();
+const jobKey = () => currentTenantId() ?? '';
+/** Resolves when every current background backfill has finished. For tests and shutdown. */
+export const backfillJobDone = async (): Promise<void> => { await Promise.all([...backfillJobs.values()]); };
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
@@ -134,6 +136,7 @@ const SettingsPatch = z.object({
   }, 'unknown timezone'),
   telegramChatIds: z.array(z.string().regex(/^-?\d{1,20}$/)).max(10),
   telegramRelayUrl: z.string().trim().max(300).regex(/^(https?:\/\/[^\s]+)?$/),
+  shareRecipes: z.boolean(),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -162,7 +165,9 @@ function publicSettings(s: Settings) {
 export function apiRouter(ctx: ApiContext): express.Router {
   const r = express.Router();
   const clock = ctx.now ?? (() => new Date());
-  let morningModes: { api_fields: boolean; api_file: boolean } | null = null;
+  /** Detected Morning modes, per tenant (in memory, like before: a restart forgets them). */
+  const morningModesByTenant = new Map<string, { api_fields: boolean; api_file: boolean }>();
+  const morningModes = () => morningModesByTenant.get(jobKey()) ?? null;
 
   /** Deps for routes that act on Gmail/cloud storage; 503 while those are not connected. */
   const live = () => {
@@ -458,7 +463,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const rows = await backfillList(live().deps);
     const s = getSettings();
     res.json({
-      rows, running: backfillJob !== null, startedAt: s.backfillStartedAt, finishedAt: s.backfillFinishedAt,
+      rows, running: backfillJobs.has(jobKey()), startedAt: s.backfillStartedAt, finishedAt: s.backfillFinishedAt,
       result: s.backfillResult, error: sanitizeError(s.backfillError), aiUsage: usageSummary(clock()).backfill,
       receiptsSetAside: getDb().prepare(
         `SELECT COUNT(*) FROM items i JOIN emails e ON e.message_id = i.message_id
@@ -468,17 +473,19 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
   // Long (every email since 1 January): answers 202 at once and runs in the background; GET /backfill polls it.
   r.post('/backfill/start', wrap((_req, res) => {
-    if (backfillJob) throw new HttpError(409, 'backfill_running');
+    const key = jobKey();
+    if (backfillJobs.has(key)) throw new HttpError(409, 'backfill_running');
     if (getSettings().backfillDone) throw new HttpError(409, 'backfill_done');
     const { deps, gmail } = live();
     updateSettings({ backfillFinishedAt: null, backfillResult: null, backfillError: null });
     const done = (patch: Partial<Settings>) => updateSettings({ backfillFinishedAt: clock().toISOString(), ...patch });
-    backfillJob = startBackfill(gmail, deps)
+    const job = startBackfill(gmail, deps)
       .then((result) => { done({ backfillResult: result }); })
       .catch((e: unknown) => { done({ backfillError: sanitizeError(e instanceof Error ? e.message : String(e)) }); })
-      .finally(() => { backfillJob = null; })
+      .finally(() => { backfillJobs.delete(key); })
       // Terminal: a throw while recording the outcome must never become an unhandled rejection.
       .catch((e: unknown) => { console.error('backfill outcome not recorded:', e instanceof Error ? e.message : 'error'); });
+    backfillJobs.set(key, job);
     res.status(202).json({ started: true });
   }));
   r.post('/backfill/approve', wrap(async (req, res) => {
@@ -491,7 +498,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ skipped: skipBackfill(ids) });
   }));
   r.post('/backfill/finish', wrap((_req, res) => {
-    if (backfillJob) throw new HttpError(409, 'backfill_running'); // items are still arriving
+    if (backfillJobs.has(jobKey())) throw new HttpError(409, 'backfill_running'); // items are still arriving
     // A run cut short by a restart left emails unread: restart it before ending the first run.
     if (getSettings().backfillError === BACKFILL_INTERRUPTED) throw new HttpError(409, 'backfill_interrupted');
     res.json({ dismissed: finishBackfill() });
@@ -501,7 +508,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
   // comes off first; if Gmail fails, nothing is deleted. The body must say so explicitly, against stray calls.
   r.post('/reset-data', wrap(async (req, res) => {
     parse(z.object({ confirm: z.literal('reset') }).strict(), req.body);
-    if (backfillJob) throw new HttpError(409, 'backfill_running');
+    if (backfillJobs.has(jobKey())) throw new HttpError(409, 'backfill_running');
     const gmail = markedEmailIds().length > 0 ? live().gmail : null;
     try {
       res.json(await resetData(gmail));
@@ -572,23 +579,31 @@ export function apiRouter(ctx: ApiContext): express.Router {
 
   // ---------- settings & secrets ----------
   r.get('/settings', wrap((_req, res) => {
-    res.json({ settings: publicSettings(getSettings()), secrets: secretStatus(), morningModes });
+    res.json({ settings: publicSettings(getSettings()), secrets: secretStatus(), morningModes: morningModes() });
   }));
 
   r.put('/settings', wrap((req, res) => {
     const { storageProvider, ...patch } = parse(SettingsPatch, req.body);
+    // The SSH agent runs on the server's host and reads a shared folder: the owner's only.
+    if (patch.ai?.mode === 'ssh' && !currentUser(res)?.isAdmin) throw new HttpError(403, 'ssh_owner_only');
     // One cloud at a time: switching disconnects the other (its token is deleted).
     if (storageProvider !== undefined) chooseStorage(storageProvider);
     // The stored credential belongs to the hub it was issued by: never carry it over to another address.
     if (patch.telegramRelayUrl !== undefined && patch.telegramRelayUrl !== getSettings().telegramRelayUrl) {
       setSecret('telegram_relay_auth', null);
     }
-    res.json({ settings: publicSettings(updateSettings(patch as Partial<Settings>)), secrets: secretStatus(), morningModes });
+    const sharing = patch.shareRecipes !== undefined && patch.shareRecipes !== getSettings().shareRecipes ? patch.shareRecipes : null;
+    const updated = updateSettings(patch as Partial<Settings>);
+    // Turning sharing off withdraws what this user shared; turning it on offers their recipes again.
+    if (sharing === false) withdrawShared();
+    if (sharing === true) publishOwnRecipes();
+    res.json({ settings: publicSettings(updated), secrets: secretStatus(), morningModes: morningModes() });
   }));
 
   r.put('/secrets/:key', wrap((req, res) => {
     const key = param(req, 'key');
     if (!(SECRET_KEYS as string[]).includes(key)) throw notFound('secret');
+    if (key === 'ssh_private_key' && !currentUser(res)?.isAdmin) throw new HttpError(403, 'ssh_owner_only');
     const { value } = parse(z.object({ value: z.string().min(1).max(20_000) }).strict(), req.body);
     setSecret(key as SecretKey, value);
     res.json({ key, configured: true }); // never echo the value
@@ -606,9 +621,11 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
 
   r.post('/morning/detect', wrap(async (_req, res) => {
-    morningModes = await (ctx.detectMorning ?? detectMorningModes)();
+    const key = jobKey();
+    const modes = await (ctx.detectMorning ?? detectMorningModes)();
+    morningModesByTenant.set(key, modes);
     // Detected from the public docs and a read-only probe; not a verified document upload (R6).
-    res.json({ modes: morningModes, verified: false });
+    res.json({ modes, verified: false });
   }));
 
   r.post('/telegram/test', wrap(async (_req, res) => {

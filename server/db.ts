@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import Database from 'better-sqlite3';
 
 export type Db = Database.Database;
@@ -175,6 +176,26 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX ai_usage_day ON ai_usage (day);
     `,
   },
+  {
+    // Recipes copied from the shared library (another user's AI wrote them): source 'shared'.
+    version: 9,
+    sql: `
+      CREATE TABLE recipes_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_key TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        json TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('starter','ai','user','shared')),
+        created_at TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1
+      );
+      INSERT INTO recipes_new (id, vendor_key, version, json, source, created_at, active)
+        SELECT id, vendor_key, version, json, source, created_at, active FROM recipes;
+      DROP TABLE recipes;
+      ALTER TABLE recipes_new RENAME TO recipes;
+      CREATE INDEX recipes_vendor ON recipes (vendor_key, version);
+    `,
+  },
 ];
 
 export function migrate(db: Db, migrations = MIGRATIONS): void {
@@ -189,18 +210,42 @@ export function migrate(db: Db, migrations = MIGRATIONS): void {
   }
 }
 
+/** The database of the tenant (user) a request or background job runs for; see runAsTenant(). */
+export interface TenantScope { id: string; db: Db }
+const scope = new AsyncLocalStorage<TenantScope>();
+
+/** Runs `fn` (and everything async it starts: timers, promises) against `tenant`'s database. */
+export function runAsTenant<T>(tenant: TenantScope, fn: () => T): T {
+  return scope.run(tenant, fn);
+}
+
+/** Id of the tenant the current code runs for; null outside any tenant (tests, single-database mode). */
+export function currentTenantId(): string | null {
+  return scope.getStore()?.id ?? null;
+}
+
+/** Opens a database file with the app's pragmas and brings it up to date. Does not touch the default database. */
+export function connectDb(file: string, migrations = MIGRATIONS): Db {
+  const d = new Database(file);
+  d.pragma('journal_mode = WAL');
+  d.pragma('foreign_keys = ON');
+  migrate(d, migrations);
+  return d;
+}
+
+/** Default database, used outside any tenant scope. The server never opens one; tests and scripts do. */
 let db: Db | null = null;
 
 export function openDb(file: string): Db {
   db?.close();
-  db = new Database(file);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  migrate(db);
+  db = connectDb(file);
   return db;
 }
 
+/** The current tenant's database; outside a tenant, the default one (throws when none is open). */
 export function getDb(): Db {
+  const t = scope.getStore();
+  if (t) return t.db;
   if (!db) throw new Error('Database not opened: call openDb() first');
   return db;
 }

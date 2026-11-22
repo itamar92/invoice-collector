@@ -1,4 +1,5 @@
 import { test, beforeEach, after } from 'node:test';
+import { freshAccounts, TEST_EMAIL } from './helpers.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,7 +17,7 @@ process.env.APP_PASSWORD = 'pw';
 
 const servers: Server[] = [];
 after(() => { for (const s of servers) s.close(); });
-beforeEach(() => { openDb(':memory:'); resetLoginLimiter(); });
+beforeEach(() => { openDb(':memory:'); freshAccounts(); resetLoginLimiter(); });
 
 const INDEX = '<!doctype html><html lang="he" dir="rtl"><body><div id="root"></div></body></html>';
 
@@ -57,7 +58,7 @@ test('/api paths keep precedence: JSON, never index.html', async () => {
     assert.match(r.headers.get('content-type') ?? '', /json/, p);
   }
   const login = await fetch(`${base}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'pw' }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: TEST_EMAIL, password: 'pw' }),
   });
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
   const nf = await fetch(`${base}/api/nope`, { headers: { cookie } });

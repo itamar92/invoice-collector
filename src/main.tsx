@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import './index.css';
 import { api, setUnauthorizedHandler } from './api.js';
-import type { SettingsResponse, Summary } from './api.js';
+import type { Me, SettingsResponse, Summary } from './api.js';
 import { AppContext, Button, ErrorText, Loading } from './components/ui.js';
 import { setCloudName, t } from './i18n/he.js';
 import Layout from './Layout.js';
@@ -12,6 +12,7 @@ import Backfill from './pages/Backfill.js';
 import Dashboard from './pages/Dashboard.js';
 import Invoices from './pages/Invoices.js';
 import ItemDetail from './pages/ItemDetail.js';
+import Invite from './pages/Invite.js';
 import Login from './pages/Login.js';
 import Missed from './pages/Missed.js';
 import Settings from './pages/Settings.js';
@@ -26,6 +27,7 @@ function ToSetup() {
 
 function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -36,9 +38,9 @@ function App() {
   const boot = useCallback(async () => {
     setBootError(null);
     try {
-      await api.me();
+      const who = await api.me();
       const [s, sum] = await Promise.all([api.settings(), api.summary()]);
-      setSettings(s); setSummary(sum); setAuthed(true);
+      setMe(who); setSettings(s); setSummary(sum); setAuthed(true);
     } catch (e) {
       if ((e as { status?: number }).status === 401) setAuthed(false);
       else setBootError((e as Error).message);
@@ -61,8 +63,16 @@ function App() {
     );
   }
   if (authed === null) return <Loading />;
-  if (!authed) return <Login onLoggedIn={() => void boot()} />;
-  if (!settings) return <Loading />;
+  if (!authed) {
+    // Signed out: an invite link signs up; every other address shows the login.
+    return (
+      <Routes>
+        <Route path="/invite/:token" element={<Invite onLoggedIn={() => void boot()} />} />
+        <Route path="*" element={<Login onLoggedIn={() => void boot()} />} />
+      </Routes>
+    );
+  }
+  if (!settings || !me) return <Loading />;
 
   // Every "{cloud}" in the Hebrew text names the chosen storage; set before the tree below renders.
   setCloudName(settings.settings.storageProvider === 'gdrive' ? t('conn.gdrive') : t('conn.dropbox'));
@@ -70,7 +80,7 @@ function App() {
   const page = (el: React.ReactNode) => (setupDone ? el : <ToSetup />);
 
   return (
-    <AppContext.Provider value={{ summary, settings, refreshSummary, refreshSettings, setSettings }}>
+    <AppContext.Provider value={{ me, setMe, summary, settings, refreshSummary, refreshSettings, setSettings }}>
       <Routes>
         <Route path="/setup" element={<Setup />} />
         <Route element={<Layout onLogout={() => setAuthed(false)} />}>
@@ -83,6 +93,8 @@ function App() {
           <Route path="vendors" element={page(<Vendors />)} />
           <Route path="missed" element={page(<Missed />)} />
           <Route path="settings" element={page(<Settings />)} />
+          <Route path="login" element={<Navigate to="/" replace />} />
+          <Route path="invite/:token" element={<Navigate to="/" replace />} />
           <Route path="*" element={page(<Navigate to="/attention" replace />)} />
         </Route>
       </Routes>

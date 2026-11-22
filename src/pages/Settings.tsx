@@ -1,24 +1,28 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
+import { AccountSection, UsersSection } from '../components/AccountSections.js';
 import { AiSection, CategoriesSection, ConnectionsSection, GeneralSection, LabelSection, ResetSection, TelegramSection } from '../components/SettingsSections.js';
 import { ButtonLink, Card, Notice, PageTitle, useApp } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 import { connectedName } from '../Layout.js';
 import type { MessageKey } from '../i18n/he.js';
 
-const SECTIONS: { id: string; key: MessageKey; body: () => ReactNode }[] = [
+const ALL_SECTIONS: { id: string; key: MessageKey; body: () => ReactNode; adminOnly?: boolean }[] = [
   { id: 'connections', key: 'settings.connections', body: () => <ConnectionsSection /> },
   { id: 'ai', key: 'settings.ai', body: () => <AiSection /> },
   { id: 'label', key: 'settings.label', body: () => <LabelSection /> },
   { id: 'telegram', key: 'settings.telegram', body: () => <TelegramSection /> },
   { id: 'categories', key: 'settings.categories', body: () => <CategoriesSection /> },
   { id: 'general', key: 'settings.general', body: () => <GeneralSection /> },
+  { id: 'account', key: 'settings.account', body: () => <AccountSection /> },
+  { id: 'users', key: 'settings.users', body: () => <UsersSection />, adminOnly: true },
   { id: 'reset', key: 'settings.reset', body: () => <ResetSection /> },
 ];
+type Section = (typeof ALL_SECTIONS)[number];
 
 /** Which section is on screen: the last one whose top has passed the menu. */
-function useActiveSection(): string {
+function useActiveSection(SECTIONS: Section[]): string {
   const [active, setActive] = useState(SECTIONS[0]!.id);
   useEffect(() => {
     const onScroll = () => {
@@ -44,8 +48,9 @@ export default function Settings() {
   const [params] = useSearchParams();
   const { hash } = useLocation();
   const connected = params.get('connected');
-  const { refreshSettings } = useApp();
-  const active = useActiveSection();
+  const { refreshSettings, me } = useApp();
+  const SECTIONS = ALL_SECTIONS.filter((s) => !s.adminOnly || me.isAdmin);
+  const active = useActiveSection(SECTIONS);
   useEffect(() => { if (connected) void refreshSettings(); }, [connected, refreshSettings]);
   // A link to /settings#categories lands on that section.
   useEffect(() => { if (hash) document.getElementById(hash.slice(1))?.scrollIntoView(); }, [hash]);

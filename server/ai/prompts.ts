@@ -80,6 +80,7 @@ export const RECIPE_SYSTEM = [
   'Some Hebrew PDFs store each amount right to left, so 88.99 appears in the text as "99 . 88" (spaces around the point, halves swapped; the shekel sign may appear as "{"). When the text shows amounts that way, capture the whole "99 . 88" and add "mirrored": true to that amount rule; the program swaps the halves back. Use "mirrored" only with parse "amount".',
   'Optional top-level "description" is a template with placeholders {issueMonth} (Hebrew month name), {issueMonth-1}, {issueYear}, {docNumber}; no other placeholders. Only use it when the description field has no rule.',
   'Do not hard-code values that change per invoice. Only include fields you can extract reliably.',
+  'The recipe is shared with other customers of the same vendor. Never put anything about this document\'s recipient (their name, address, customer or account number, phone, email) in a text marker, a pattern or a const value.',
 ].join('\n');
 
 export function recipeUserPrompt(i: {

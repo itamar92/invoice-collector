@@ -172,9 +172,29 @@ type AiMode = Settings['ai']['mode'];
 const AI_MODES: AiMode[] = ['anthropic', 'openai', 'gemini', 'ssh', 'none'];
 const KEY_OF: Partial<Record<AiMode, SecretKey>> = { anthropic: 'ai_key_anthropic', openai: 'ai_key_openai', gemini: 'ai_key_gemini' };
 
+/** Opt in/out of offering this user's recipes to the server's other users; saves on change. */
+function ShareRecipes() {
+  const { s, save } = useSettings();
+  const a = useAction();
+  const on = s.settings.shareRecipes;
+  return (
+    <div className="space-y-1 border-t border-line pt-4">
+      <label className="flex min-h-10 items-center gap-2 text-sm font-medium">
+        <input type="checkbox" className="size-5" checked={on} disabled={a.busy}
+          onChange={(e) => { const v = e.target.checked; void a.run(() => save({ shareRecipes: v })); }} />
+        {t('ai.share')}
+      </label>
+      <p className={hintCls}>{t('ai.shareHint')}</p>
+      <ErrorText>{a.error}</ErrorText>
+    </div>
+  );
+}
+
 export function AiSection() {
-  const { s, save, saveSecret } = useSettings();
+  const { s, save, saveSecret, app } = useSettings();
   const ai = s.settings.ai;
+  // The SSH agent runs on the server's own host: offered to the owner only.
+  const modes = AI_MODES.filter((m) => m !== 'ssh' || app.me.isAdmin || ai.mode === 'ssh');
   const [mode, setMode] = useState<AiMode>(ai.mode);
   const [model, setModel] = useState(ai.model ?? '');
   const [ssh, setSsh] = useState({ host: ai.ssh?.host ?? '', port: String(ai.ssh?.port ?? 22), user: ai.ssh?.user ?? '', hostKeySha256: ai.ssh?.hostKeySha256 ?? '' });
@@ -204,7 +224,7 @@ export function AiSection() {
       <p className="text-sm text-muted">{t('ai.intro')}</p>
       <fieldset className="grid gap-2 sm:grid-cols-2">
         <legend className="mb-1 text-[13px] font-semibold">{t('ai.mode')}</legend>
-        {AI_MODES.map((m) => (
+        {modes.map((m) => (
           <label key={m} className={`flex min-h-10 items-center gap-2 rounded-xl border px-3 text-sm ${mode === m ? 'border-accent bg-accent-tint font-semibold' : 'border-line-strong'}`}>
             <input type="radio" name="ai-mode" className="size-4" checked={mode === m} onChange={() => { setMode(m); setSaved(false); }} />
             {t(`ai.mode.${m}` as MessageKey)}
@@ -241,6 +261,7 @@ export function AiSection() {
       </div>
       {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.text}</Notice>}
       <ErrorText>{saving.error ?? test.error}</ErrorText>
+      <ShareRecipes />
       <AiUsage />
     </div>
   );
