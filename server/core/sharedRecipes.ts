@@ -24,16 +24,19 @@ export function shareable(r: Recipe): Recipe | null {
   try { return compileRecipe({ ...r, fields }); } catch { return null; }
 }
 
-/** Publishes (or replaces) the vendor's shared recipe. Never throws: sharing must not break a user's save. */
-export function publishShared(r: Recipe, source: 'ai' | 'user'): void {
+/**
+ * Publishes the vendor's shared recipe. `replace` false only fills a vendor the library does not have yet
+ * (re-offering old recipes must not overwrite newer ones). Never throws: sharing must not break a user's save.
+ */
+export function publishShared(r: Recipe, source: 'ai' | 'user', replace = true): void {
   if (!lib) return;
   const share = shareable(r);
   if (!share) return;
   try {
     lib.prepare(
       `INSERT INTO shared_recipes (vendor_key, display_name, json, source, contributed_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(vendor_key) DO UPDATE SET display_name = excluded.display_name, json = excluded.json,
-         source = excluded.source, contributed_by = excluded.contributed_by, updated_at = excluded.updated_at`,
+       ON CONFLICT(vendor_key) DO ${replace ? `UPDATE SET display_name = excluded.display_name, json = excluded.json,
+         source = excluded.source, contributed_by = excluded.contributed_by, updated_at = excluded.updated_at` : 'NOTHING'}`,
     ).run(share.vendorKey, share.displayName, JSON.stringify(share), source, currentTenantId(), new Date().toISOString());
   } catch (e) {
     console.warn(`shared recipe for ${share.vendorKey} not published:`, e instanceof Error ? e.message : 'error');
@@ -53,6 +56,15 @@ export function findShared(sender: string, text: string): Recipe | null {
     markerOnly ??= r;
   }
   return markerOnly;
+}
+
+/**
+ * Removes every library recipe the current user contributed. Copies other users already took stay theirs.
+ * Returns how many were removed.
+ */
+export function withdrawShared(): number {
+  if (!lib) return 0;
+  return lib.prepare('DELETE FROM shared_recipes WHERE contributed_by IS ?').run(currentTenantId()).changes;
 }
 
 export function noteAdopted(vendorKey: string): void {

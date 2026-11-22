@@ -352,7 +352,10 @@ then read by that recipe instead of the AI; it is copied into their own recipes 
 any other: if it fails on a document, their AI rewrites it. What is shared is the matching rule (the vendor's
 sender address or name markers) and the field patterns; never the category, and never a recipe that matches on
 a free-mail address or a generic word, or one set to "always use AI". A user who already has a recipe for that
-vendor keeps their own. The AI is told never to put the recipient's name, address or account number in a recipe.
+vendor keeps their own. The AI is told never to put the recipient's name, address or account number in a recipe. Each user can turn sharing off
+in **Settings → AI** ("Share recipes with other users"): that removes the recipes they shared from the library
+(copies others already took stay with them) and shares nothing new; they still use other users' recipes.
+Turning it back on offers their recipes again, for vendors the library does not have yet.
 
 ## 8. Troubleshooting
 

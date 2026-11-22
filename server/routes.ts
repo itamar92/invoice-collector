@@ -13,11 +13,12 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
+import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
 import { reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from './core/pipeline.js';
 import { checkRecipe, compileRecipe, RecipeError } from './core/recipe.js';
 import {
-  getActiveRecipe, getVendor, listVendors, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
+  getActiveRecipe, getVendor, listVendors, publishOwnRecipes, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, upsertVendor,
 } from './core/recipeStore.js';
 import type { Item } from './core/items.js';
 import { FolderConflictError, FolderNotFoundError } from './core/types.js';
@@ -135,6 +136,7 @@ const SettingsPatch = z.object({
   }, 'unknown timezone'),
   telegramChatIds: z.array(z.string().regex(/^-?\d{1,20}$/)).max(10),
   telegramRelayUrl: z.string().trim().max(300).regex(/^(https?:\/\/[^\s]+)?$/),
+  shareRecipes: z.boolean(),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -590,7 +592,12 @@ export function apiRouter(ctx: ApiContext): express.Router {
     if (patch.telegramRelayUrl !== undefined && patch.telegramRelayUrl !== getSettings().telegramRelayUrl) {
       setSecret('telegram_relay_auth', null);
     }
-    res.json({ settings: publicSettings(updateSettings(patch as Partial<Settings>)), secrets: secretStatus(), morningModes: morningModes() });
+    const sharing = patch.shareRecipes !== undefined && patch.shareRecipes !== getSettings().shareRecipes ? patch.shareRecipes : null;
+    const updated = updateSettings(patch as Partial<Settings>);
+    // Turning sharing off withdraws what this user shared; turning it on offers their recipes again.
+    if (sharing === false) withdrawShared();
+    if (sharing === true) publishOwnRecipes();
+    res.json({ settings: publicSettings(updated), secrets: secretStatus(), morningModes: morningModes() });
   }));
 
   r.put('/secrets/:key', wrap((req, res) => {

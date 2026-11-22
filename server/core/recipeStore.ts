@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDb } from '../db.js';
+import { getSettings } from '../settings.js';
 import { compileRecipe, matchesRecipe, RecipeError, senderMatches, unsafeAiMatch, type Recipe } from './recipe.js';
 import { findShared, noteAdopted, publishShared } from './sharedRecipes.js';
 
@@ -107,8 +108,17 @@ export function saveRecipe(r: Recipe, source: RecipeSource): number {
     return Number(info.lastInsertRowid);
   })();
   // A recipe that was written or fixed here is offered to every other user (a starter or shared one already is).
-  if (source === 'ai' || source === 'user') publishShared(recipe, source);
+  if ((source === 'ai' || source === 'user') && getSettings().shareRecipes) publishShared(recipe, source);
   return id;
+}
+
+/** After sharing is turned back on: offers each active recipe written or fixed here, for vendors the library lacks. */
+export function publishOwnRecipes(): void {
+  const rows = getDb().prepare("SELECT json, source FROM recipes WHERE active = 1 AND source IN ('ai','user')")
+    .all() as { json: string; source: 'ai' | 'user' }[];
+  for (const r of rows) {
+    try { publishShared(compileRecipe(JSON.parse(r.json)), r.source, false); } catch { /* a stored recipe that no longer compiles */ }
+  }
 }
 
 /**

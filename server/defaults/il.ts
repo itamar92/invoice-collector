@@ -65,4 +65,5 @@ export const IL_DEFAULTS: Settings = {
   lastMissedScanAt: null,
   telegramChatIds: [],
   telegramRelayUrl: '',
+  shareRecipes: true,
 };

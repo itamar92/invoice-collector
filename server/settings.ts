@@ -45,6 +45,8 @@ export type Settings = {
   telegramChatIds: string[];
   /** Address of a shared Telegram bot service (hub) this instance connects to; empty = none. */
   telegramRelayUrl: string;
+  /** Offer recipes written or fixed here to the server's other users (server/core/sharedRecipes.ts). */
+  shareRecipes: boolean;
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

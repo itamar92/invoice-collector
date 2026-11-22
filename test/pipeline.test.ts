@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connectDb, openDb, getDb, runAsTenant } from '../server/db.js';
 import { openAccounts } from '../server/accounts.js';
-import { findShared, sharedStats, useSharedRecipes } from '../server/core/sharedRecipes.js';
+import { findShared, sharedStats, useSharedRecipes, withdrawShared } from '../server/core/sharedRecipes.js';
 import { createEmail, createItem, getItem, transition, updateItem } from '../server/core/items.js';
 import {
-  getVendor, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, type VendorStatus,
+  getVendor, publishOwnRecipes, recipeHistory, saveRecipe, setVendorCategory, setVendorStatus, type VendorStatus,
 } from '../server/core/recipeStore.js';
 import { PdfError } from '../server/core/pdfText.js';
 import type { Recipe } from '../server/core/recipe.js';
@@ -1061,5 +1061,33 @@ test('shared recipes: a user\'s own recipe for the vendor wins; unsafe or aiAlwa
       assert.equal(getItem(id)!.reason, 'no_recipe_no_ai'); // her own acme recipe is kept, not replaced
       assert.equal(recipeHistory('acme').length, 1);
     });
+  } finally { useSharedRecipes(null); }
+});
+
+test('shared recipes: opting out stops sharing and withdraws only this user\'s; opting back in re-offers without overwriting', () => {
+  useSharedRecipes(openAccounts(':memory:'));
+  try {
+    const dana = { id: 'dana', db: connectDb(':memory:') };
+    const eli = { id: 'eli', db: connectDb(':memory:') };
+    runAsTenant(eli, () => saveRecipe(layoutRecipe('beta', 'billing@beta.example'), 'ai'));
+    runAsTenant(dana, () => {
+      saveRecipe(layoutRecipe('acme', 'billing@acme.example'), 'ai');
+      assert.equal(sharedStats().recipes, 2);
+
+      updateSettings({ shareRecipes: false });
+      assert.equal(withdrawShared(), 1); // Dana's acme only
+      saveRecipe(layoutRecipe('gamma', 'billing@gamma.example'), 'user');
+      assert.equal(findShared('billing@acme.example', invoiceText()), null);
+      assert.equal(findShared('billing@gamma.example', invoiceText()), null, 'nothing new is shared while off');
+      assert.ok(findShared('billing@beta.example', invoiceText()), 'Eli\'s stays');
+    });
+    // Meanwhile Eli shares a newer acme recipe.
+    runAsTenant(eli, () => saveRecipe(layoutRecipe('acme', 'billing@acme.example', { displayName: 'Eli acme' }), 'ai'));
+    runAsTenant(dana, () => {
+      updateSettings({ shareRecipes: true });
+      publishOwnRecipes();
+    });
+    assert.ok(findShared('billing@gamma.example', invoiceText()), 're-offered');
+    assert.equal(findShared('billing@acme.example', invoiceText())!.displayName, 'Eli acme', 'newer one kept');
   } finally { useSharedRecipes(null); }
 });

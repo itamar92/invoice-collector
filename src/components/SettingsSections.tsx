@@ -172,6 +172,24 @@ type AiMode = Settings['ai']['mode'];
 const AI_MODES: AiMode[] = ['anthropic', 'openai', 'gemini', 'ssh', 'none'];
 const KEY_OF: Partial<Record<AiMode, SecretKey>> = { anthropic: 'ai_key_anthropic', openai: 'ai_key_openai', gemini: 'ai_key_gemini' };
 
+/** Opt in/out of offering this user's recipes to the server's other users; saves on change. */
+function ShareRecipes() {
+  const { s, save } = useSettings();
+  const a = useAction();
+  const on = s.settings.shareRecipes;
+  return (
+    <div className="space-y-1 border-t border-line pt-4">
+      <label className="flex min-h-10 items-center gap-2 text-sm font-medium">
+        <input type="checkbox" className="size-5" checked={on} disabled={a.busy}
+          onChange={(e) => { const v = e.target.checked; void a.run(() => save({ shareRecipes: v })); }} />
+        {t('ai.share')}
+      </label>
+      <p className={hintCls}>{t('ai.shareHint')}</p>
+      <ErrorText>{a.error}</ErrorText>
+    </div>
+  );
+}
+
 export function AiSection() {
   const { s, save, saveSecret, app } = useSettings();
   const ai = s.settings.ai;
@@ -243,6 +261,7 @@ export function AiSection() {
       </div>
       {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.text}</Notice>}
       <ErrorText>{saving.error ?? test.error}</ErrorText>
+      <ShareRecipes />
       <AiUsage />
     </div>
   );
