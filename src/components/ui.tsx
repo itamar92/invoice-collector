@@ -130,6 +130,7 @@ const ICONS = {
   import: <><path d="M10 3.5v8M6.5 8.5 10 12l3.5-3.5" /><path d="M4 13.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2" /></>,
   settings: <><path d="M4 6h5M13 6h3M4 14h3M11 14h5" /><circle cx="11" cy="6" r="2" /><circle cx="9" cy="14" r="2" /></>,
   check: <path d="m4.5 10.5 3.5 3.5 7.5-8" />,
+  send: <><path d="M16.5 3.5 3.5 9l5 2 2 5z" /><path d="m8.5 11 8-7.5" /></>,
   close: <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />,
   alert: <><circle cx="10" cy="10" r="7" /><path d="M10 6.5v4" /><circle cx="10" cy="13.4" r="0.6" fill="currentColor" /></>,
   down: <path d="m5.5 8 4.5 4.5L14.5 8" />,

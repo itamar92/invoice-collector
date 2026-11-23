@@ -10,6 +10,7 @@ import Layout from './Layout.js';
 import Attention from './pages/Attention.js';
 import Backfill from './pages/Backfill.js';
 import Dashboard from './pages/Dashboard.js';
+import MorningCatchup from './pages/MorningCatchup.js';
 import Invoices from './pages/Invoices.js';
 import ItemDetail from './pages/ItemDetail.js';
 import Invite from './pages/Invite.js';
@@ -90,6 +91,7 @@ function App() {
           <Route path="invoices" element={page(<Invoices />)} />
           <Route path="dashboard" element={page(<Dashboard />)} />
           <Route path="backfill" element={page(<Backfill />)} />
+          <Route path="morning" element={page(<MorningCatchup />)} />
           <Route path="vendors" element={page(<Vendors />)} />
           <Route path="missed" element={page(<Missed />)} />
           <Route path="settings" element={page(<Settings />)} />

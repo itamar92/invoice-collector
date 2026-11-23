@@ -901,3 +901,65 @@ test('keep-receipt files a receipt that was set aside for its invoice; other ite
   assert.equal((await res.json()).state, 'ready');
   assert.equal((await call('POST', `/api/items/${other}/keep-receipt`)).status, 409);
 });
+
+test('restore brings a dismissed or ignored document back; a filed one can be dismissed and restored', async () => {
+  const key = businessVendor();
+  const fresh = item('needs_attention', {}, 'r1');
+  setItemVendor(fresh, key);
+  transition(fresh, 'dismissed', undefined, 'manual_dismiss');
+  const filed = item('needs_attention', { docNumber: '2002' }, 'r2');
+  setItemVendor(filed, key);
+  updateItem(filed, { storagePath: '/x/a.pdf', accountingRef: 'ref-1' });
+  transition(filed, 'done');
+  const live = item('needs_attention', null, 'r3');
+  const { call } = await boot();
+
+  const back = await call('POST', `/api/items/${fresh}/restore`);
+  assert.equal(back.status, 200);
+  assert.equal((await back.json()).state, 'ready');
+  assert.equal((await call('POST', `/api/items/${live}/restore`)).status, 409); // not dismissed or ignored
+
+  assert.equal((await (await call('POST', `/api/items/${filed}/dismiss`)).json()).state, 'dismissed'); // approved, then changed mind
+  assert.equal((await (await call('POST', `/api/items/${filed}/restore`)).json()).state, 'done'); // already sent: stays sent
+
+  setVendorStatus(key, 'ignored');
+  transition(fresh, 'ignored', undefined, 'vendor_ignored');
+  const blocked = await call('POST', `/api/items/${fresh}/restore`);
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).error, 'item_vendor_ignored');
+});
+
+test('restore refuses a dismissed duplicate while the original is live', async () => {
+  const key = businessVendor();
+  const a = item('needs_attention', {}, 'd1');
+  const b = item('needs_attention', {}, 'd2'); // same vendor and number: dismissed as a duplicate
+  setItemVendor(a, key); setItemVendor(b, key);
+  const dup = [a, b].find((id) => getItem(id)!.state === 'dismissed')!;
+  assert.ok(dup);
+  const { call } = await boot();
+  const res = await call('POST', `/api/items/${dup}/restore`);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, 'item_duplicate');
+});
+
+test('items list: sorts by a column (empty values last) and filters by category, year and filed', async () => {
+  const mk = (tag: string, f: Partial<ExtractedFields>, state: 'done' | 'needs_attention' = 'done') => {
+    const id = item('needs_attention', { docNumber: tag, ...f }, tag);
+    if (state === 'done') getDb().prepare("UPDATE items SET state = 'done' WHERE id = ?").run(id);
+    return id;
+  };
+  const a = mk('s1', { total: 50, category: 'משרד', issueDate: '2026-02-01' });
+  const b = mk('s2', { total: 300, category: 'רכב', issueDate: '2026-03-01' });
+  const c = mk('s3', { total: null, category: null, issueDate: '2025-05-01' });
+  const d = mk('s4', { total: 10, category: 'משרד', issueDate: '2026-04-01' }, 'needs_attention');
+  const { call } = await boot();
+  const ids = async (qs: string) => ((await (await call('GET', `/api/items?${qs}`)).json()) as any).items.map((i: any) => i.id);
+  assert.deepEqual(await ids('sort=total&dir=desc'), [b, a, d, c]);
+  assert.deepEqual(await ids('sort=total&dir=asc'), [d, a, b, c]);
+  assert.deepEqual(await ids('sort=date&dir=asc'), [c, a, b, d]);
+  assert.deepEqual((await ids('category=%D7%9E%D7%A9%D7%A8%D7%93&sort=date&dir=asc')), [a, d]);
+  assert.deepEqual(await ids('category=%D7%9E%D7%A9%D7%A8%D7%93&filed=1'), [a]);
+  assert.deepEqual(await ids('category=-'), [c]);
+  assert.deepEqual((await ids('year=2026&sort=date&dir=asc')), [a, b, d]);
+  assert.equal((await call('GET', '/api/items?sort=bogus')).status, 400);
+});

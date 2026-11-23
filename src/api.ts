@@ -39,6 +39,18 @@ export type ItemDetail = Item & {
 };
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
+/** A filed document that never went to Morning (first import, or Morning not connected yet). */
+export interface CatchupRow {
+  id: string; vendor: string | null; docNumber: string | null; issueDate: string | null; total: number | null;
+  currency: string | null; category: string | null; filename: string | null; why: 'backfill' | 'not_configured';
+}
+export interface MorningMatch {
+  status: 'found' | 'maybe' | 'not_found' | 'unknown'; where?: 'expense' | 'draft'; morningId?: string;
+  seen?: { number: string | null; amount: number | null; supplier: string | null; date: string | null };
+}
+export type CatchupCheck = MorningMatch & { id: string; error?: string };
+export interface CatchupSent { id: string; outcome: 'sent' | 'in_morning' | 'failed'; error?: string; match?: MorningMatch }
+export type ItemSort = 'vendor' | 'category' | 'state' | 'date' | 'total';
 export interface Vendor { key: string; displayName: string; status: VendorStatus; defaultCategory: string | null; createdAt: string }
 export interface RecipeVersion { version: number; source: 'starter' | 'ai' | 'user' | 'shared'; createdAt: string; recipe: Record<string, unknown> & { aiAlways?: boolean } }
 
@@ -159,9 +171,17 @@ export const api = {
   stats: (year?: number) => get<Stats>(`/api/stats${year ? `?year=${year}` : ''}`),
   runWorker: () => send<Summary>('POST', '/api/worker/run'),
 
-  items: (q: { state?: ItemState; q?: string; worth?: boolean; vendor?: string; limit?: number; offset?: number } = {}) => {
+  items: (q: {
+    state?: ItemState; q?: string; worth?: boolean; vendor?: string; limit?: number; offset?: number;
+    category?: string; year?: number; filed?: boolean; sort?: ItemSort; dir?: 'asc' | 'desc';
+  } = {}) => {
     const p = new URLSearchParams();
     if (q.state) p.set('state', q.state);
+    if (q.category) p.set('category', q.category);
+    if (q.year) p.set('year', String(q.year));
+    if (q.filed) p.set('filed', '1');
+    if (q.sort) p.set('sort', q.sort);
+    if (q.dir) p.set('dir', q.dir);
     if (q.vendor) p.set('vendor', q.vendor);
     if (q.q) p.set('q', q.q);
     if (q.worth) p.set('worth', '1');
@@ -175,6 +195,12 @@ export const api = {
     send<{ item: Item; valid: boolean; problems: Reason[] }>('PUT', `/api/items/${enc(id)}/fields`, patch),
   retry: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/retry`),
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
+  catchup: () => get<{ rows: CatchupRow[]; mode: string | null; canCheck: boolean }>('/api/morning/catchup'),
+  catchupCheck: (ids: string[]) => send<{ results: CatchupCheck[] }>('POST', '/api/morning/catchup/check', { ids }),
+  catchupSend: (ids: string[]) => send<{ results: CatchupSent[] }>('POST', '/api/morning/catchup/send', { ids }),
+  catchupMark: (ids: string[], as: 'in_morning' | 'skipped', refs?: Record<string, { where: 'expense' | 'draft'; morningId: string }>) =>
+    send<{ changed: number }>('POST', '/api/morning/catchup/mark', { ids, as, refs }),
+  restore: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/restore`),
   /** A receipt set aside because its tax invoice is on file: file it anyway. */
   keepReceipt: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/keep-receipt`),
   /** Reads the document again with its vendor's current recipe (no AI). */

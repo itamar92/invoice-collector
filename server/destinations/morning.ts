@@ -240,6 +240,104 @@ function isSameDocument(e: any, f: ExtractedFields): boolean {
   return name !== '' && name === normName(f.vendorName);
 }
 
+/** What Morning already holds for one of our documents (catch-up send after the first import). */
+export interface MorningMatch {
+  /** found: same number, amount and supplier. maybe: two of the three agree. not_found: nothing close.
+   *  unknown: our document has neither a number nor a total, so nothing can be compared. */
+  status: 'found' | 'maybe' | 'not_found' | 'unknown';
+  where?: 'expense' | 'draft';
+  morningId?: string;
+  /** What Morning holds, so the owner can judge a "maybe". */
+  seen?: { number: string | null; amount: number | null; supplier: string | null; date: string | null };
+}
+
+/** Morning expense statuses that no longer count (100 = deleted); draft statuses 50 failed and 200 declined. */
+const DEAD_EXPENSE = new Set([100]);
+const DEAD_DRAFT = new Set([50, 200]);
+const DRAFT_LOOKUP_DAYS = 400;
+const DRAFT_PAGES = 20;
+const DRAFT_CACHE_MS = 5 * 60_000;
+
+/** Document numbers compared loosely: case, spacing, punctuation and leading zeros do not matter. */
+const normNumber = (s: unknown) =>
+  typeof s === 'string' || typeof s === 'number' ? String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '').replace(/^0+(?=\d)/, '') : '';
+
+function compare(e: any, f: ExtractedFields): 'found' | 'maybe' | null {
+  if (!e) return null;
+  const ourNum = normNumber(f.docNumber);
+  const num = ourNum !== '' && normNumber(e.number) === ourNum;
+  const amount = typeof e.amount === 'number' && f.total !== null && Math.abs(e.amount - f.total) <= 0.01;
+  const s = e.supplier ?? {};
+  const taxId = digits(s.taxId);
+  const supplier = (taxId !== '' && taxId === digits(f.vendorTaxId))
+    || (normName(s.name) !== '' && normName(s.name) === normName(f.vendorName));
+  const date = typeof e.date === 'string' && !!f.issueDate && e.date.slice(0, 10) === f.issueDate;
+  if (num && amount && supplier) return 'found';
+  if (num && (amount || supplier)) return 'maybe';
+  // Our document has no number: the same amount, day and supplier is as close as it gets.
+  if (ourNum === '' && amount && supplier && date) return 'maybe';
+  return null;
+}
+
+const seenOf = (e: any): MorningMatch['seen'] => ({
+  number: e?.number != null ? String(e.number) : null,
+  amount: typeof e?.amount === 'number' ? e.amount : null,
+  supplier: typeof e?.supplier?.name === 'string' ? e.supplier.name : null,
+  date: typeof e?.date === 'string' ? e.date.slice(0, 10) : null,
+});
+
+/**
+ * Looks for documents in Morning before they are sent there: approved expenses (searched by document number, or by
+ * supplier and amount when there is none) and recent drafts (fetched once and kept a few minutes, since the drafts
+ * search cannot filter by number). Read-only. Matching rules: compare() above.
+ */
+export class MorningLookup {
+  private readonly client: Client;
+  private readonly now: () => Date;
+  private drafts: { at: number; items: any[] } | null = null;
+
+  constructor(opts: HostOptions & { now?: () => Date } = {}) {
+    this.now = opts.now ?? (() => new Date());
+    this.client = makeClient(opts, this.now);
+  }
+
+  private async recentDrafts(): Promise<any[]> {
+    if (this.drafts && this.now().getTime() - this.drafts.at < DRAFT_CACHE_MS) return this.drafts.items;
+    const from = ymd(new Date(this.now().getTime() - DRAFT_LOOKUP_DAYS * 86_400_000));
+    const items: any[] = [];
+    for (let page = 1; page <= DRAFT_PAGES; page++) {
+      const out = await this.client.post('/expenses/drafts/search', { fromDate: from, page, pageSize: 100 });
+      const got = Array.isArray(out?.items) ? out.items : [];
+      items.push(...got);
+      if (got.length < 100 || (typeof out?.pages === 'number' && page >= out.pages)) break;
+    }
+    this.drafts = { at: this.now().getTime(), items };
+    return items;
+  }
+
+  async find(f: ExtractedFields): Promise<MorningMatch> {
+    if (!normNumber(f.docNumber) && f.total === null) return { status: 'unknown' };
+    const query = normNumber(f.docNumber)
+      ? { number: String(f.docNumber), page: 1, pageSize: 50 }
+      : { supplierName: f.vendorName ?? undefined, minAmount: f.total, maxAmount: f.total, page: 1, pageSize: 50 };
+    const out = await this.client.post('/expenses/search', query);
+    const expenses = (Array.isArray(out?.items) ? out.items : []).filter((e: any) => !DEAD_EXPENSE.has(e?.status));
+    const drafts = (await this.recentDrafts()).filter((d: any) => !DEAD_DRAFT.has(d?.status));
+    let maybe: MorningMatch | null = null;
+    for (const [where, list] of [['expense', expenses], ['draft', drafts]] as const) {
+      for (const x of list) {
+        const e = where === 'expense' ? x : x?.expense;
+        const r = compare(e, f);
+        if (!r) continue;
+        const m: MorningMatch = { status: r, where, morningId: x?.id != null ? String(x.id) : undefined, seen: seenOf(e) };
+        if (r === 'found') return m;
+        maybe ??= m;
+      }
+    }
+    return maybe ?? { status: 'not_found' };
+  }
+}
+
 /** api_fields is unconfirmed (docs/morning-api.md) so always false; api_file needs a working read-only drafts search. */
 export async function detectMorningModes(opts: HostOptions = {}):
   Promise<{ api_fields: boolean; api_file: boolean }> {
