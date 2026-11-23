@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Stats } from '../api.js';
-import { ButtonLink, Card, Dot, Empty, ErrorText, fmtMoney, inputCls, Loading, PageTitle, rowCls, useApp, useLoad } from '../components/ui.js';
+import { ButtonLink, Card, Dot, Empty, ErrorText, fmtMoney, Icon, inputCls, Loading, PageTitle, rowCls, useApp, useLoad } from '../components/ui.js';
 import type { MessageKey } from '../i18n/he.js';
 import { t } from '../i18n/he.js';
 
@@ -10,7 +10,13 @@ const SLOTS = 8;
 const OTHER = '\u0000other';
 const NONE = '\u0000none';
 
-interface Series { key: string; label: string; color: string; link: string | null; count: number; total: number }
+interface Part { category: string; count: number; total: number; link: string }
+/** `parts`: for the "other" slice, the categories folded into it, each with its own link. */
+interface Series { key: string; label: string; color: string; link: string | null; count: number; total: number; parts: Part[] }
+
+/** The filed documents of one category in one year, as counted here, on the invoices page. */
+const docsLink = (year: number, category: string | null) =>
+  `/invoices?${new URLSearchParams({ filed: '1', year: String(year), category: category ?? '-' })}`;
 
 /**
  * One colour per category, tied to the category itself: its place in the settings list picks the slot, so a
@@ -33,9 +39,13 @@ function buildSeries(s: Stats, configured: string[]): { series: Series[]; keyOf:
       key, count: 0, total: 0,
       label: key === NONE ? t('dash.noCategory') : key === OTHER ? t('dash.other') : key,
       color: key === NONE ? 'var(--cat-none)' : key === OTHER ? 'var(--cat-other)' : `var(--cat-${slot.get(key)})`,
-      link: key === NONE || key === OTHER ? null : `/invoices?q=${encodeURIComponent(key)}`,
+      link: key === OTHER ? null : docsLink(s.year, c.category),
+      parts: [],
     };
     cur.count += c.count; cur.total += c.total;
+    if (key === OTHER && c.category !== null) {
+      cur.parts.push({ category: c.category, count: c.count, total: c.total, link: docsLink(s.year, c.category) });
+    }
     byKey.set(key, cur);
   }
   const tail = (k: string) => (k === NONE ? 2 : k === OTHER ? 1 : 0);
@@ -111,6 +121,7 @@ export default function Dashboard() {
   useEffect(() => { void refreshSummary(); }, [refreshSummary]);
   const [year, setYear] = useState<number | undefined>(undefined);
   const [active, setActive] = useState<string | null>(null);
+  const [openOther, setOpenOther] = useState(false);
   const load = useLoad(() => api.stats(year), [year]);
   const s = load.data;
   const configured = settings!.settings.categories.map((c) => c.name);
@@ -164,10 +175,33 @@ export default function Dashboard() {
                         <span className="num text-[13px] text-muted">{Math.round((x.count / s.count) * 100)}%</span>
                       </span>
                     );
-                    const cls = `-mx-2 block rounded-xl px-2 py-2 transition-[opacity,background-color] ${dim(x.key)}`;
+                    const cls = `-mx-2 block w-full rounded-xl px-2 py-2 text-start transition-[opacity,background-color] ${dim(x.key)}`;
                     return (
                       <li key={x.key} className={rowCls} {...hover(x.key)}>
-                        {x.link ? <Link to={x.link} className={`${cls} hover:bg-ground`}>{body}</Link> : <div className={cls}>{body}</div>}
+                        {x.link ? <Link to={x.link} className={`${cls} hover:bg-ground`}>{body}</Link> : x.parts.length ? (
+                          <>
+                            <button type="button" className={`${cls} hover:bg-ground`} aria-expanded={openOther} onClick={() => setOpenOther(!openOther)}>
+                              {body}
+                              <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-accent-deep">
+                                {t(openOther ? 'dash.otherHide' : 'dash.otherShow', { n: x.parts.length })}
+                                <Icon name={openOther ? 'up' : 'down'} className="size-3.5" />
+                              </span>
+                            </button>
+                            {openOther && (
+                              <ul className="mb-2 ms-5 border-s-2 border-line ps-3">
+                                {x.parts.map((p) => (
+                                  <li key={p.category}>
+                                    <Link to={p.link} className="-mx-2 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 rounded-lg px-2 py-1.5 text-sm hover:bg-ground">
+                                      <span className="truncate">{p.category}</span>
+                                      <span className="num text-[13px] text-muted">{t('dash.docs', { n: p.count })}</span>
+                                      <span className="num font-medium">{fmtMoney(p.total, s.currency)}</span>
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        ) : <div className={cls}>{body}</div>}
                       </li>
                     );
                   })}

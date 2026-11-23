@@ -22,9 +22,28 @@ export interface ItemPatch {
   attempts?: number; nextAttemptAt?: string | null; recipeFailed?: boolean;
 }
 
+export const ITEM_SORTS = ['vendor', 'category', 'state', 'date', 'total'] as const;
+export type ItemSort = typeof ITEM_SORTS[number];
+
 export interface ItemFilter {
   state?: ItemState | ItemState[]; messageId?: string; limit?: number; offset?: number; q?: string; vendorKey?: string;
+  /** Exact category name; null = documents without one. */
+  category?: string | null;
+  /** Year of the document's date (issue date, else arrival), as the summary page counts it. */
+  year?: number;
+  /** Default: newest arrival first. */
+  sort?: ItemSort; dir?: 'asc' | 'desc';
 }
+
+/** A document's date: its issue date when extracted, else when it arrived (same rule as the summary). */
+const DOC_DATE = `COALESCE(json_extract(fields_json, '$.issueDate'), created_at)`;
+const SORT_SQL: Record<ItemSort, string> = {
+  vendor: `COALESCE(NULLIF(json_extract(fields_json, '$.vendorName'), ''), attachment_name) COLLATE NOCASE`,
+  category: `NULLIF(TRIM(json_extract(fields_json, '$.category')), '')`,
+  state: 'state',
+  date: DOC_DATE,
+  total: `CAST(json_extract(fields_json, '$.total') AS REAL)`,
+};
 
 const now = () => new Date().toISOString();
 
@@ -178,8 +197,16 @@ export function listItems(filter: ItemFilter = {}): Item[] {
     where.push(`(attachment_name LIKE ? ESCAPE '\\' OR vendor_key LIKE ? ESCAPE '\\' OR fields_json LIKE ? ESCAPE '\\')`);
     args.push(like, like, like);
   }
+  if (filter.category === null) where.push(`NULLIF(TRIM(json_extract(fields_json, '$.category')), '') IS NULL`);
+  else if (filter.category !== undefined) { where.push(`TRIM(json_extract(fields_json, '$.category')) = ?`); args.push(filter.category); }
+  if (filter.year !== undefined) { where.push(`substr(${DOC_DATE}, 1, 4) = ?`); args.push(String(filter.year)); }
+  const dir = filter.dir === 'asc' ? 'ASC' : 'DESC';
+  // Rows without a value go last whichever way the column is sorted.
+  const order = filter.sort
+    ? `(${SORT_SQL[filter.sort]}) IS NULL, ${SORT_SQL[filter.sort]} ${dir}, created_at DESC, rowid DESC`
+    : 'created_at DESC, rowid DESC';
   const sql = `SELECT ${COLS} FROM items ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-               ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`;
+               ORDER BY ${order} LIMIT ? OFFSET ?`;
   args.push(filter.limit ?? 100, filter.offset ?? 0);
   return (getDb().prepare(sql).all(...args) as Record<string, unknown>[])
     .map((r) => rowToItem({ ...r, pdf: r.pdf === 1 ? 1 : null }));

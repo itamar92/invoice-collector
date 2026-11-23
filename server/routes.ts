@@ -10,7 +10,7 @@ import {
 } from './core/backfill.js';
 import { listIngestFailures } from './core/ingestFailures.js';
 import {
-  getEmail, getItem, getItemPdf, isUploadId, listItems, setItemFields, setItemVendor, transition, isTerminal, updateItem,
+  getEmail, getItem, getItemPdf, isUploadId, listItems, ITEM_SORTS, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
 import { withdrawShared } from './core/sharedRecipes.js';
@@ -27,9 +27,10 @@ import { FolderConflictError, FolderNotFoundError } from './core/types.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { currentTenantId, getDb } from './db.js';
-import { detectMorningModes, fetchMorningClassifications, type MorningClassification } from './destinations/morning.js';
+import { detectMorningModes, fetchMorningClassifications, MorningLookup, type MorningClassification } from './destinations/morning.js';
+import { checkCatchup, listCatchup, markCatchup, sendCatchup, type Lookup } from './core/catchup.js';
 import { chooseStorage } from './destinations/storage.js';
-import { secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
+import { getSecret, secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
 import { stats } from './stats.js';
 import { sanitizeError, summary, worthSince } from './summary.js';
 import type { SecretKey } from './secrets.js';
@@ -55,6 +56,8 @@ export interface ApiContext {
   morningClassifications?: () => Promise<MorningClassification[]>;
   /** Injectable for tests; default asks Telegram who the bot is (read-only getMe). */
   telegramInfo?: () => Promise<{ username: string }>;
+  /** Injectable for tests; default searches Morning's expenses and drafts (read-only). Null: no API keys. */
+  morningLookup?: () => Lookup | null;
   /** Injectable for tests; default talks to the shared-bot hub over HTTP. */
   relayClient?: (url: string, auth: string | null) => RelayClient;
   now?: () => Date;
@@ -100,6 +103,13 @@ const ListQuery = z.object({
   q: z.string().max(200).optional(),
   worth: z.enum(['1']).optional(),
   vendor: z.string().min(1).max(100).optional(),
+  /** Exact category; "-" = documents without one. */
+  category: z.string().min(1).max(200).optional(),
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  /** Filed only (stored or done), as the summary counts them. Ignored when `state` is given. */
+  filed: z.enum(['1']).optional(),
+  sort: z.enum(ITEM_SORTS).optional(),
+  dir: z.enum(['asc', 'desc']).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -107,6 +117,23 @@ const ListQuery = z.object({
 const StatsQuery = z.object({ year: z.coerce.number().int().min(2000).max(2100).optional() });
 
 const Ids = z.object({ ids: z.array(z.string().min(1)).max(1000) }).strict();
+/** Catch-up check and send run in small batches so each request stays short; the page sends batch after batch. */
+const CatchupBatch = z.object({ ids: z.array(z.string().min(1)).min(1).max(25) }).strict();
+const CatchupMark = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(1000),
+  as: z.enum(['in_morning', 'skipped']),
+  refs: z.record(z.string(), z.object({ where: z.enum(['expense', 'draft']), morningId: z.string().min(1).max(100) })).optional(),
+}).strict();
+
+/** One lookup per tenant, so its short draft cache serves a whole run of batches. */
+const lookups = new Map<string, MorningLookup>();
+function defaultLookup(): Lookup | null {
+  if (!getSecret('morning_id') || !getSecret('morning_secret')) return null;
+  const key = currentTenantId() ?? '';
+  let l = lookups.get(key);
+  if (!l) { l = new MorningLookup(); lookups.set(key, l); }
+  return l;
+}
 
 const SettingsPatch = z.object({
   currency: z.string().min(1),
@@ -203,10 +230,13 @@ export function apiRouter(ctx: ApiContext): express.Router {
       ? new Set(getDb().prepare('SELECT id FROM items WHERE recipe_failed = 1 AND updated_at >= ?').pluck()
         .all(worthSince(clock())) as string[])
       : null;
+    const filter = {
+      state: q.state ?? (q.filed ? ['stored', 'done'] as ItemState[] : undefined), q: q.q || undefined, vendorKey: q.vendor,
+      category: q.category === '-' ? null : q.category, year: q.year, sort: q.sort, dir: q.dir,
+    };
     const items = (worthIds
-      ? listItems({ state: q.state, q: q.q || undefined, vendorKey: q.vendor, limit: 100_000 }).filter((i) => worthIds.has(i.id))
-        .slice(q.offset, q.offset + q.limit)
-      : listItems({ state: q.state, q: q.q || undefined, vendorKey: q.vendor, limit: q.limit, offset: q.offset }))
+      ? listItems({ ...filter, limit: 100_000 }).filter((i) => worthIds.has(i.id)).slice(q.offset, q.offset + q.limit)
+      : listItems({ ...filter, limit: q.limit, offset: q.offset }))
       .map(({ text, ...rest }) => ({ ...rest, hasText: !!text?.trim() }));
     res.json({ items, limit: q.limit, offset: q.offset });
   }));
@@ -341,11 +371,42 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json(getItem(item.id));
   }));
 
+  // The owner changes their mind about a document: dismissed even after it was filed or sent. The file stays in
+  // storage and any Morning draft stays there; the document just leaves the summary and stops moving.
   r.post('/items/:id/dismiss', wrap((req, res) => {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
-    if (isTerminal(item.state)) throw new HttpError(409, 'item_already_final');
+    if (item.state === 'dismissed' || item.state === 'ignored') throw new HttpError(409, 'item_already_final');
     transition(item.id, 'dismissed', undefined, 'manual_dismiss');
+    res.json(getItem(item.id));
+  }));
+
+  // The way back: a dismissed or ignored document re-enters the flow where it belongs. A filed one returns to
+  // filed (accounting decides again), an unread one is read again, an approved-vendor one is filed.
+  r.post('/items/:id/restore', wrap((req, res) => {
+    const item = getItem(param(req, 'id'));
+    if (!item) throw notFound('item');
+    if (item.state !== 'dismissed' && item.state !== 'ignored') throw new HttpError(409, 'item_not_restorable');
+    const vendor = item.vendorKey ? getVendor(item.vendorKey) : null;
+    if (vendor?.status === 'ignored') throw new HttpError(409, 'item_vendor_ignored');
+    const check = item.fields ? validateFields(item.fields, getSettings(), clock().toISOString().slice(0, 10)) : null;
+    const pendingBackfill = getEmail(item.messageId)?.mode === 'backfill' && !getSettings().backfillDone;
+    const to: ItemState = !item.fields ? 'queued'
+      : !vendor || vendor.status === 'unreviewed' ? 'awaiting_vendor'
+        : item.storagePath ? (item.accountingRef ? 'done' : 'stored')
+          : !check!.ok ? 'needs_attention'
+            : pendingBackfill ? 'awaiting_backfill_approval' : 'ready';
+    const reason = to === 'awaiting_vendor' ? 'new_vendor' as const : to === 'needs_attention' && check && !check.ok ? check.problems[0] : undefined;
+    try {
+      getDb().transaction(() => {
+        updateItem(item.id, { attempts: 0, nextAttemptAt: null });
+        transition(item.id, to, reason, 'manual_restore');
+      })();
+    } catch (e) {
+      // Dismissed copies sit outside the doc-number index: a second live copy of the same document is refused.
+      if ((e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'item_duplicate');
+      throw e;
+    }
     res.json(getItem(item.id));
   }));
 
@@ -712,6 +773,31 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.delete('/telegram/relay/chats/:id', wrap(async (req, res) => {
     await viaRelay(() => relay(true).unlink(param(req, 'id')));
     res.json({ ok: true });
+  }));
+
+  // ---------- catch-up send to Morning (first-import documents, or filed before Morning was connected) ----------
+  const lookupNow = () => (ctx.morningLookup ?? defaultLookup)();
+  r.get('/morning/catchup', wrap((_req, res) => {
+    const s = getSettings();
+    res.json({ rows: listCatchup(s), mode: s.morning.mode, canCheck: lookupNow() !== null });
+  }));
+  r.post('/morning/catchup/check', wrap(async (req, res) => {
+    const { ids } = parse(CatchupBatch, req.body);
+    const lookup = lookupNow();
+    if (!lookup) throw new HttpError(409, 'morning_no_api_keys');
+    const results = await checkCatchup(ids, getSettings(), lookup);
+    res.json({ results: results.map((r) => ({ ...r, error: r.error ? sanitizeError(r.error) : undefined })) });
+  }));
+  r.post('/morning/catchup/send', wrap(async (req, res) => {
+    const { ids } = parse(CatchupBatch, req.body);
+    const { deps } = live();
+    if (!deps.accounting || !getSettings().morning.mode) throw new HttpError(409, 'morning_not_configured');
+    const results = await sendCatchup(ids, deps, lookupNow());
+    res.json({ results: results.map((r) => ({ ...r, error: r.error ? sanitizeError(r.error) : undefined })) });
+  }));
+  r.post('/morning/catchup/mark', wrap((req, res) => {
+    const { ids, as, refs } = parse(CatchupMark, req.body);
+    res.json({ changed: markCatchup(ids, as, getSettings(), refs) });
   }));
 
   r.get('/morning/classifications', wrap(async (_req, res) => {

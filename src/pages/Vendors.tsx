@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import type { AiUsageTotals, Item, Reapplied, RecipeCheck, RecipeVersion, Vendor, VendorStatus } from '../api.js';
 import { RecipeCheckView } from '../components/RecipeCheck.js';
@@ -202,11 +202,44 @@ function VendorRow({ vendor, categories, onChange }: { vendor: Vendor; categorie
   );
 }
 
+const NO_CATEGORY = '-';
+
 export default function Vendors() {
   const { settings } = useApp();
   const list = useLoad(() => api.vendors());
   const categories = settings!.settings.categories.map((c) => c.name);
   const replace = (v: Vendor) => list.setData((list.data ?? []).map((x) => (x.key === v.key ? v : x)));
+
+  // Filters live in the URL, so going back from a vendor's documents keeps them.
+  const [params, setParams] = useSearchParams();
+  const q = params.get('q') ?? '';
+  const status = (params.get('status') as VendorStatus | null) || '';
+  const category = params.get('category') ?? '';
+  const set = (k: string, v: string) => {
+    const n = new URLSearchParams(params);
+    if (v) n.set(k, v); else n.delete(k);
+    setParams(n, { replace: true });
+  };
+
+  const all = list.data ?? [];
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const v of all) c[v.status] = (c[v.status] ?? 0) + 1;
+    return c;
+  }, [all]);
+  const usedCategories = [...new Set([...categories, ...all.map((v) => v.defaultCategory).filter((c): c is string => !!c)])];
+  const needle = q.trim().toLocaleLowerCase();
+  const shown = all.filter((v) => (!status || v.status === status)
+    && (!category || (category === NO_CATEGORY ? !v.defaultCategory : v.defaultCategory === category))
+    && (!needle || v.displayName.toLocaleLowerCase().includes(needle) || v.key.toLocaleLowerCase().includes(needle)));
+  const filtering = !!(needle || status || category);
+
+  const chip = (value: VendorStatus | '', label: string, n: number) => (
+    <button key={value || 'all'} type="button" aria-pressed={status === value} onClick={() => set('status', value)}
+      className={`min-h-9 rounded-full border px-3 text-sm transition-colors ${status === value ? 'border-accent bg-accent text-white' : 'border-line-strong bg-white hover:bg-ground'}`}>
+      {label} <span className={`num text-xs ${status === value ? 'text-white/80' : 'text-muted'}`}>{n}</span>
+    </button>
+  );
 
   return (
     <div className="space-y-4">
@@ -216,11 +249,31 @@ export default function Vendors() {
           <div key={s}><dt className="inline font-semibold">{t(`vendorStatus.${s}` as MessageKey)}: </dt><dd className="inline text-muted">{t(`vendorStatus.${s}Hint` as MessageKey)}</dd></div>
         ))}
       </dl>
+      {all.length > 0 && (
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_14rem]">
+            <input type="search" className={inputCls} placeholder={t('vendors.searchPlaceholder')} aria-label={t('common.search')}
+              value={q} onChange={(e) => set('q', e.target.value)} />
+            <select className={inputCls} aria-label={t('field.category')} value={category} onChange={(e) => set('category', e.target.value)}>
+              <option value="">{t('vendors.allCategories')}</option>
+              <option value={NO_CATEGORY}>{t('dash.noCategory')}</option>
+              {usedCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t('vendors.status')}>
+            {chip('', t('common.all'), all.length)}
+            {(['business', 'personal', 'ignored', 'unreviewed'] as const).map((s) => chip(s, t(`vendorStatus.${s}` as MessageKey), counts[s] ?? 0))}
+          </div>
+        </div>
+      )}
       <Card>
-        {list.loading && !list.data ? <Loading rows={5} /> : list.error ? <ErrorText>{list.error}</ErrorText> : !list.data?.length ? <Empty>{t('vendors.empty')}</Empty> : (
-          <ul>
-            {list.data.map((v) => <VendorRow key={v.key} vendor={v} categories={categories} onChange={replace} />)}
-          </ul>
+        {list.loading && !list.data ? <Loading rows={5} /> : list.error ? <ErrorText>{list.error}</ErrorText> : !all.length ? <Empty>{t('vendors.empty')}</Empty> : !shown.length ? <Empty>{t('vendors.noMatch')}</Empty> : (
+          <>
+            {filtering && <p className="text-xs text-muted">{t('vendors.shown', { n: shown.length, total: all.length })}</p>}
+            <ul>
+              {shown.map((v) => <VendorRow key={v.key} vendor={v} categories={categories} onChange={replace} />)}
+            </ul>
+          </>
         )}
       </Card>
     </div>

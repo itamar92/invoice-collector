@@ -11,7 +11,6 @@ import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const EDITABLE: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_backfill_approval', 'ready'];
-const TERMINAL: ItemState[] = ['done', 'ignored', 'dismissed'];
 const DOC_TYPES = ['tax_invoice', 'receipt', 'tax_invoice_receipt', 'credit_note', 'other'] as const;
 
 type FieldKey = Exclude<keyof ExtractedFields, 'vatConfirmed'>;
@@ -118,9 +117,13 @@ export default function ItemDetail() {
     await leave(t('item.receiptKeptNamed', { name: itemTitle(item) }));
   }, 'keep-receipt');
   const dismiss = () => {
-    if (!window.confirm(t('item.dismissConfirm'))) return;
+    if (!window.confirm(t(item.storagePath ? 'item.dismissFiledConfirm' : 'item.dismissConfirm'))) return;
     void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); }, 'dismiss');
   };
+  const restore = () => act.run(async () => {
+    await api.restore(item.id);
+    await refresh(t('item.restoredNamed', { name: itemTitle(item) }));
+  }, 'restore');
   /** Saves the owner's corrections (if any) so the recipe writer reads them as the right answer; returns the vendor. */
   const saveForRecipe = async (): Promise<string | null> => {
     if (!dirty) return item.vendorKey;
@@ -205,7 +208,8 @@ export default function ItemDetail() {
             {editable && item.emailMode !== 'backfill' && <Button variant="secondary" loading={act.is('send')} disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
             {editable && !item.storagePath && item.hasText && <Button variant="ghost" loading={act.is('reparse')} disabled={act.busy} onClick={reparse}>{t('item.reparse')}</Button>}
             {item.state === 'needs_attention' && <Button variant="secondary" loading={act.is('retry')} disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
-            {!TERMINAL.includes(item.state) && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
+            {(item.state === 'dismissed' || (item.state === 'ignored' && !invoiceOf)) && <Button variant="secondary" loading={act.is('restore')} disabled={act.busy} onClick={restore}>{t('item.restore')}</Button>}
+            {item.state !== 'dismissed' && item.state !== 'ignored' && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
           </div>
           <ErrorText>{act.error}</ErrorText>
 

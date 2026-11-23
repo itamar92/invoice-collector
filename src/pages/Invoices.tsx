@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
-import type { ItemState } from '../api.js';
+import type { ItemSort, ItemState } from '../api.js';
 import {
-  Avatar, Button, Empty, ErrorText, fmtDate, fmtMoney, inputCls, itemTitle, Loading, PageTitle, reasonLabel, rowCls, StateBadge,
+  Avatar, Button, Empty, ErrorText, Icon, fmtDate, fmtMoney, inputCls, itemTitle, Loading, PageTitle, reasonLabel, rowCls, StateBadge,
   stateLabel, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
@@ -13,16 +13,28 @@ const STATES: ItemState[] = [
   'ignored', 'dismissed',
 ];
 const PAGE = 50;
+const SORTS: ItemSort[] = ['vendor', 'category', 'state', 'date', 'total'];
+/** First click on a column: names A→Z, dates and amounts largest/newest first. */
+const FIRST_DIR: Record<ItemSort, 'asc' | 'desc'> = { vendor: 'asc', category: 'asc', state: 'asc', date: 'desc', total: 'desc' };
 
 export default function Invoices() {
   const [params, setParams] = useSearchParams();
   const state = (params.get('state') as ItemState | null) || undefined;
   const q = params.get('q') ?? '';
   const page = Math.max(0, Number(params.get('page') ?? 0) || 0);
+  const sortParam = params.get('sort') as ItemSort | null;
+  const sort = sortParam && SORTS.includes(sortParam) ? sortParam : undefined;
+  const dir = params.get('dir') === 'asc' ? 'asc' : params.get('dir') === 'desc' ? 'desc' : sort ? FIRST_DIR[sort] : undefined;
+  const category = params.get('category') || undefined;
+  const year = Number(params.get('year')) || undefined;
+  const filed = params.get('filed') === '1';
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
 
-  const list = useLoad(() => api.items({ state, q: q || undefined, limit: PAGE, offset: page * PAGE }), [state, q, page]);
+  const list = useLoad(
+    () => api.items({ state, q: q || undefined, category, year, filed, sort, dir, limit: PAGE, offset: page * PAGE }),
+    [state, q, category, year, filed, sort, dir, page],
+  );
   const set = (patch: Record<string, string | null>) => {
     const n = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) { if (v) n.set(k, v); else n.delete(k); }
@@ -30,6 +42,22 @@ export default function Invoices() {
     setParams(n);
   };
   const items = list.data?.items ?? [];
+  const sortBy = (col: ItemSort) => set({ sort: col, dir: sort === col ? (dir === 'asc' ? 'desc' : 'asc') : FIRST_DIR[col] });
+  /** A column title that sorts the list by it; a second click flips the direction. */
+  const Head = ({ col, className = '', children }: { col: ItemSort; className?: string; children: string }) => (
+    <span className={className} aria-sort={sort === col ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" onClick={() => sortBy(col)} title={t('invoices.sortBy', { col: children })}
+        className={`-mx-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 hover:bg-ground hover:text-ink ${sort === col ? 'font-semibold text-ink' : ''}`}>
+        {children}
+        {sort === col && <Icon name={dir === 'asc' ? 'up' : 'down'} className="size-3.5" />}
+      </button>
+    </span>
+  );
+  const scope = [
+    category && { key: 'category', label: category === '-' ? t('dash.noCategory') : category },
+    year && { key: 'year', label: String(year) },
+    filed && { key: 'filed', label: t('invoices.filedOnly') },
+  ].filter((x): x is { key: string; label: string } => !!x);
 
   // Phone: two lines per invoice. Desktop: one line, four aligned columns.
   const cols = 'grid grid-cols-[2.25rem_minmax(0,1fr)_auto] gap-x-3 md:grid-cols-[2.25rem_minmax(0,5fr)_minmax(0,3fr)_minmax(0,5fr)_6rem_7rem]';
@@ -46,13 +74,25 @@ export default function Invoices() {
         <Button type="submit" variant="secondary">{t('common.search')}</Button>
       </form>
 
+      {scope.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted">{t('invoices.scope')}</span>
+          {scope.map((f) => (
+            <button key={f.key} type="button" onClick={() => set({ [f.key]: null })} aria-label={t('invoices.removeFilter', { name: f.label })}
+              className="inline-flex min-h-8 items-center gap-1 rounded-full border border-line-strong bg-white px-3 hover:bg-ground">
+              {f.label}<span aria-hidden="true" className="text-muted">×</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <section className="panel">
         <div className={`${cols} border-b border-line pb-2 text-xs font-medium text-muted`}>
-          <span className="col-span-2">{t('common.vendor')}</span>
-          <span className="hidden md:block">{t('field.category')}</span>
-          <span className="hidden md:block">{t('common.state')}</span>
-          <span className="hidden md:block">{t('common.date')}</span>
-          <span className="text-end">{t('common.total')}</span>
+          <Head col="vendor" className="col-span-2">{t('common.vendor')}</Head>
+          <Head col="category" className="hidden md:block">{t('field.category')}</Head>
+          <Head col="state" className="hidden md:block">{t('common.state')}</Head>
+          <Head col="date" className="hidden md:block">{t('common.date')}</Head>
+          <Head col="total" className="text-end">{t('common.total')}</Head>
         </div>
         {list.loading && !list.data ? <Loading rows={6} /> : list.error ? <ErrorText>{list.error}</ErrorText> : items.length === 0 ? <Empty /> : (
           <ul>

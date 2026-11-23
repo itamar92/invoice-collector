@@ -15,6 +15,22 @@
   429/5xx from the login host is transient. Unknown: whether a *legacy* token is accepted by the v2 upload host.
 - Hosts: `MORNING_GATEWAY_URL` (login, default `https://api.morning.co`, sandbox `https://api.sandbox.morning.dev`).
 
+## Catch-up send (page "שליחה ל-Morning", `server/core/catchup.ts`)
+Filed documents that were finished without booking (`backfill_no_accounting`, `accounting_not_configured`), from a
+business vendor in a sendToAccounting category, can be sent later. Before sending, `MorningLookup` (read-only) checks
+what Morning holds, per the official v2 spec (2026-11):
+- `POST /expenses/search` with `{number}` (or, with no document number, `{supplierName, minAmount, maxAmount}` = our
+  total). Its `fromDate`/`toDate` filter the VAT reporting month, not the document date, so they are not used.
+  Status 100 (deleted) is ignored.
+- `POST /expenses/drafts/search` by creation date (last 400 days, up to 20 pages of 100), cached 5 minutes, since it
+  cannot filter by number. Drafts with status 50 (failed) or 200 (declined) are ignored.
+- found = same number (case, punctuation and leading zeros ignored) + amount within 0.01 + supplier (tax id digits or
+  normalized name). maybe = number plus one of the other two, or (no number) amount + supplier + same day. Draft fields
+  come from Morning's OCR, so a draft not parsed yet is not seen.
+The server looks each document up again right before sending; a found one is recorded (`accounting_mode` =
+`existing`, ref `expense:<id>` or `draft:<id>`) instead of sent. A lookup error stops that document. Without API keys
+(email mode) nothing can be checked and the page says so.
+
 ## Expense upload (v2), used by api_file
 1. `GET {upload host}/file-upload/v1/url?context=expense&data={"source":5}` (authenticated) returns
    `{url, fields, maxFileSize}`, a pre-signed S3 POST that is valid for **60 seconds**. Here `data {"source":5}` means

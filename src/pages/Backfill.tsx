@@ -9,7 +9,7 @@ import {
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 
-/** First-run list (spec §4.5): approve → filed to Dropbox only. The UI offers no way to send these to Morning. */
+/** First-run list (spec §4.5): approve → filed to Dropbox only. Sending them to Morning afterwards: /morning. */
 export default function Backfill() {
   const { settings, summary, setSettings, refreshSummary, refreshSettings } = useApp();
   const polling = useRef(false);
@@ -90,6 +90,9 @@ export default function Backfill() {
       {rerunNote && <Notice tone="ok">{rerunNote}</Notice>}
       {finished && <Notice tone="ok">{t('backfill.finished')}</Notice>}
       {done && !finished && <Notice>{t('backfill.done')}</Notice>}
+      {done && (
+        <Notice>{t('backfill.toMorning')} <Link to="/morning" className="font-semibold underline">{t('backfill.toMorningLink')}</Link></Notice>
+      )}
       <p className="text-sm text-muted">{t('backfill.intro')}</p>
       {running && (
         <Notice>
