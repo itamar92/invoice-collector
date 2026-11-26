@@ -140,8 +140,10 @@ need to set up the one you use.
 2. Permissions tab, enable exactly:
    - `files.content.write`
    - `files.metadata.read`
+   - `files.content.read` (only for the drop-in inbox below)
 
-   Press Submit.
+   Press Submit. After adding a permission to an existing app, press connect in Settings again so the new
+   token carries it.
 3. Settings tab, add the redirect URI (exact):
 
    ```
@@ -152,6 +154,12 @@ need to set up the one you use.
    Restart, then press connect in Settings.
 
 Files are never overwritten: if a file with the same name exists and differs, a numbered name is used.
+
+**Drop-in inbox.** For invoices you have to download yourself from a supplier's website, turn on
+"Take in files put in the base folder" in Settings (Categories and folders). Then put the PDF (or a photo)
+directly in the storage root, not in a year folder. On the next worker pass it is read like an upload, filed under
+the folder template, and the original is deleted from the root (Dropbox keeps deleted files 30 days). Only PDF,
+JPEG and PNG files are taken; anything else is left alone. Needs `files.content.read`.
 
 #### Where documents are saved in Dropbox
 

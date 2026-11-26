@@ -68,4 +68,5 @@ export const IL_DEFAULTS: Settings = {
   shareRecipes: true,
   ownTaxIds: [],
   autoApproveVendors: true,
+  storageInbox: false,
 };

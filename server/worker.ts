@@ -10,6 +10,7 @@ import type { VendorStatus } from './core/recipeStore.js';
 import type { Deps } from './core/types.js';
 import { ingestMessage, markHandledIfComplete } from './sources/gmail.js';
 import type { GmailSource } from './sources/gmail.js';
+import { collectInbox } from './sources/storageInbox.js';
 
 const MISSED_SCAN_HOUR = 6;
 
@@ -79,6 +80,11 @@ export function startWorker(getDeps: () => WorkerContext, opts: WorkerOptions = 
       });
 
       await step(async () => { await autoApproveWaitingVendors(deps); }); // setting on: nothing waits for the owner
+
+      await step(async () => { // files dropped by hand in the storage root; queued here, filed by the step below
+        const r = await collectInbox(deps);
+        errors.push(...r.errors);
+      });
 
       await step(async () => {
         for (const it of dueItems(now.toISOString())) {

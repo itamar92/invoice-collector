@@ -13,6 +13,8 @@ const STATES: ItemState[] = [
   'ignored', 'dismissed',
 ];
 const PAGE = 50;
+const HIDE_KEY = 'invoices.hideClosed';
+const readHide = () => { try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; } };
 const SORTS: ItemSort[] = ['vendor', 'category', 'state', 'date', 'total'];
 /** First click on a column: names A→Z, dates and amounts largest/newest first. */
 const FIRST_DIR: Record<ItemSort, 'asc' | 'desc'> = { vendor: 'asc', category: 'asc', state: 'asc', date: 'desc', total: 'desc' };
@@ -28,6 +30,15 @@ export default function Invoices() {
   const category = params.get('category') || undefined;
   const year = Number(params.get('year')) || undefined;
   const filed = params.get('filed') === '1';
+  // Hide ignored and rejected documents; remembered on this device. A state picked in the list wins.
+  const [hideClosed, setHideClosed] = useState(readHide);
+  const toggleHide = () => {
+    const next = !hideClosed;
+    try { localStorage.setItem(HIDE_KEY, next ? '1' : '0'); } catch { /* private mode */ }
+    setHideClosed(next);
+    if (page) set({ page: null });
+  };
+  const hiding = hideClosed && !state;
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
   // Selection mode: pick documents that should not have been collected and remove them together.
@@ -39,8 +50,8 @@ export default function Invoices() {
   const { refreshSummary } = useApp();
 
   const list = useLoad(
-    () => api.items({ state, q: q || undefined, category, year, filed, sort, dir, limit: PAGE, offset: page * PAGE }),
-    [state, q, category, year, filed, sort, dir, page],
+    () => api.items({ state, q: q || undefined, category, year, filed, hideClosed: hiding, sort, dir, limit: PAGE, offset: page * PAGE }),
+    [state, q, category, year, filed, hiding, sort, dir, page],
   );
   const set = (patch: Record<string, string | null>) => {
     const n = new URLSearchParams(params);
@@ -95,9 +106,15 @@ export default function Invoices() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PageTitle>{t('invoices.title')}</PageTitle>
+        <div className="flex flex-wrap items-center gap-2">
+        <Button variant={hideClosed ? 'secondary' : 'ghost'} aria-pressed={hideClosed} disabled={!!state} onClick={toggleHide}
+          title={state ? t('invoices.hideClosedOff') : undefined}>
+          {hideClosed ? t('invoices.showClosed') : t('invoices.hideClosed')}
+        </Button>
         <Button variant={selecting ? 'secondary' : 'ghost'} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
           {!selecting && <Icon name="trash" />}{selecting ? t('remove.selectDone') : t('remove.select')}
         </Button>
+        </div>
       </div>
       {outcome && <Notice tone={outcome.tone}>{outcome.text}</Notice>}
       <form className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[14rem_minmax(0,1fr)_auto]" onSubmit={(e) => { e.preventDefault(); set({ q: text.trim() || null }); }}>

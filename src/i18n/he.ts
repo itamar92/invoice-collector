@@ -368,6 +368,9 @@ export const he = {
   'invoices.scope': 'מוצגים רק:',
   'invoices.removeFilter': 'הסרת הסינון {name}',
   'invoices.filedOnly': 'מסמכים שתויקו',
+  'invoices.hideClosed': 'הסתרת נדחים ומתעלמים',
+  'invoices.showClosed': 'הצגת נדחים ומתעלמים',
+  'invoices.hideClosedOff': 'לא פעיל כשנבחר מצב מסוים',
 
   // backfill
   'backfill.title': 'ייבוא ראשון',
@@ -822,6 +825,8 @@ export const he = {
   'notif.pushFailed': 'שליחת ההתראה נכשלה',
 
   // automatic flow
+  'inbox.label': 'לקלוט קבצים שמניחים בתיקיית הבסיס',
+  'inbox.hint': 'חשבונית שהורדתם ידנית מאתר של ספק: שימו את ה-PDF (או צילום) ישירות בתיקייה {folder} ב-Dropbox, לא בתיקיית שנה. בסבב הבא המערכת קוראת אותו, מתייקת בתיקייה הנכונה ומוחקת את המקור מתיקיית הבסיס. דורש הרשאת files.content.read באפליקציית Dropbox וחיבור מחדש.',
   'auto.title': 'עיבוד אוטומטי',
   'auto.label': 'לאשר ספקים חדשים אוטומטית כעסקיים',
   'auto.hint': 'חשבונית מספק חדש תתויק ותישלח ל-Morning בלי לחכות לאישור. ספק פרטי או לא רלוונטי אפשר לשנות בכל רגע בדף הספקים. מסמכי הייבוא הראשון תמיד מחכים לאישור.',

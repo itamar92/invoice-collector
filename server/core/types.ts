@@ -57,8 +57,13 @@ export interface StorageDestination {
    * Drive moves it to the trash. 'not_found' when nothing is there any more.
    */
   remove?(path: string): Promise<'removed' | 'not_found'>;
+  /** Files (not folders) directly inside `folder` ('' = the top). For the drop-in inbox. */
+  listFiles?(folder: string): Promise<FileEntry[]>;
+  /** The bytes of the file at `path` (as listFiles gave it). */
+  download?(path: string): Promise<Buffer>;
 }
 export interface FolderEntry { name: string; path: string }
+export interface FileEntry { name: string; path: string; size: number }
 /** createFolder: a file (not a folder) already has that name. */
 export class FolderConflictError extends Error {
   constructor(path: string) { super(`a file already exists at: ${path}`); this.name = 'FolderConflictError'; }

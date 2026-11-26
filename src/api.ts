@@ -194,13 +194,14 @@ export const api = {
 
   items: (q: {
     state?: ItemState; q?: string; worth?: boolean; vendor?: string; limit?: number; offset?: number;
-    category?: string; year?: number; filed?: boolean; sort?: ItemSort; dir?: 'asc' | 'desc';
+    category?: string; year?: number; filed?: boolean; hideClosed?: boolean; sort?: ItemSort; dir?: 'asc' | 'desc';
   } = {}) => {
     const p = new URLSearchParams();
     if (q.state) p.set('state', q.state);
     if (q.category) p.set('category', q.category);
     if (q.year) p.set('year', String(q.year));
     if (q.filed) p.set('filed', '1');
+    if (q.hideClosed) p.set('hideClosed', '1');
     if (q.sort) p.set('sort', q.sort);
     if (q.dir) p.set('dir', q.dir);
     if (q.vendor) p.set('vendor', q.vendor);

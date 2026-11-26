@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { FolderEntry, StorageDestination } from '../core/types.js';
+import type { FileEntry, FolderEntry, StorageDestination } from '../core/types.js';
 import { FolderConflictError, FolderNotFoundError, TransientError } from '../core/types.js';
 import { getSecret } from '../secrets.js';
 
@@ -122,6 +122,41 @@ export class DropboxStorage implements StorageDestination {
     return 'removed';
   }
 
+  /** Files directly inside `folder` ('' = the top of the app folder). A missing folder is simply empty. */
+  async listFiles(folder: string): Promise<FileEntry[]> {
+    const p = ('/' + folder).replace(/\/{2,}/g, '/').replace(/\/$/, '');
+    const req = (url: string, body: unknown) => this.call((tok) => this.f(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+    let r = await req('https://api.dropboxapi.com/2/files/list_folder', { path: p, recursive: false, include_deleted: false, limit: 2000 });
+    if (r.status === 409 && /not_found/.test(summary(r.body))) return [];
+    const out: FileEntry[] = [];
+    for (let page = 0; ; page++) {
+      this.assertOk(r);
+      for (const e of r.body?.entries ?? []) {
+        if (e?.['.tag'] === 'file' && typeof e.name === 'string' && typeof e.path_display === 'string') {
+          out.push({ name: e.name, path: e.path_display, size: Number(e.size) || 0 });
+        }
+      }
+      if (!r.body?.has_more || page >= 20) break;
+      r = await req('https://api.dropboxapi.com/2/files/list_folder/continue', { cursor: r.body.cursor });
+    }
+    return out;
+  }
+
+  /** files/download. Needs the files.content.read permission on the Dropbox app. */
+  async download(path: string): Promise<Buffer> {
+    const arg = asciiJson({ path });
+    const r = await this.call((tok) => this.f('https://content.dropboxapi.com/2/files/download', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Dropbox-API-Arg': arg },
+    }), true);
+    this.assertOk(r);
+    return r.body as Buffer;
+  }
+
   private assertOk(r: ApiResult): void {
     if (r.status >= 200 && r.status < 300) return;
     const msg = `Dropbox ${r.status}: ${summary(r.body) || 'error'}`;
@@ -132,21 +167,24 @@ export class DropboxStorage implements StorageDestination {
   }
 
   /** Runs one API call with a valid access token; on expired_access_token refreshes once and retries once. */
-  private async call(run: (token: string) => Promise<Response>): Promise<ApiResult> {
-    let r = await this.attempt(run, await this.accessToken());
+  /** `binary`: a 2xx body is returned as a Buffer (downloads); errors are still read as JSON. */
+  private async call(run: (token: string) => Promise<Response>, binary = false): Promise<ApiResult> {
+    let r = await this.attempt(run, await this.accessToken(), binary);
     if (r.status === 401 && summary(r.body).startsWith('expired_access_token')) {
       this.token = null;
-      r = await this.attempt(run, await this.accessToken());
+      r = await this.attempt(run, await this.accessToken(), binary);
     }
     return r;
   }
 
-  private async attempt(run: (token: string) => Promise<Response>, token: string): Promise<ApiResult> {
+  private async attempt(run: (token: string) => Promise<Response>, token: string, binary = false): Promise<ApiResult> {
     let res: Response;
     try { res = await run(token); } catch (e) {
       throw new TransientError(`Dropbox network error: ${(e as Error).message}`);
     }
-    return { status: res.status, body: await readBody(res), retryAfter: res.headers.get('retry-after') };
+    const ok = res.status >= 200 && res.status < 300;
+    const body = binary && ok ? Buffer.from(await res.arrayBuffer()) : await readBody(res);
+    return { status: res.status, body, retryAfter: res.headers.get('retry-after') };
   }
 
   private async accessToken(): Promise<string> {

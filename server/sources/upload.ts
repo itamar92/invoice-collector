@@ -9,7 +9,7 @@ import { updateSettings } from '../settings.js';
 import { isPdf } from './gmail.js';
 
 /** Where the owner handed the document in. Stored as the "sender" of the upload's source row. */
-export type UploadSource = 'upload' | 'telegram';
+export type UploadSource = 'upload' | 'telegram' | 'dropbox';
 
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
