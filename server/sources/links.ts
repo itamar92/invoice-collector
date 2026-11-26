@@ -10,7 +10,7 @@ export class LinkError extends Error {
   }
 }
 
-const KEEP = /pdf|invoice|receipt|חשבונית|קבלה|הורדה|download/i;
+const KEEP = /pdf|invoice|receipt|document|חשבונית|קבלה|הורדה|להורדת|מסמך|לצפי(?:י)?ה|download/i;
 const DROP = /unsubscribe|privacy|optout|opt-out|preferences|הסרה|פרטיות/i;
 const MAX_LINKS = 5;
 
@@ -147,7 +147,7 @@ export interface DownloadOptions {
 }
 
 const defaultResolve = (host: string) => lookup(host, { all: true });
-const MAX_REDIRECTS = 3;
+const MAX_REDIRECTS = 6;
 
 async function assertSafe(url: URL, resolve: NonNullable<DownloadOptions['resolve']>): Promise<void> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
@@ -168,74 +168,166 @@ async function assertSafe(url: URL, resolve: NonNullable<DownloadOptions['resolv
   if (addrs.some((a) => isBlockedAddress(a.address))) throw new LinkError('link_blocked', 'host resolves to a blocked address');
 }
 
+const BROWSER_HEADERS: Record<string, string> = {
+  // Some vendor sites (behind Cloudflare and the like) refuse a bare server fetch; look like a browser.
+  'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  accept: 'application/pdf,text/html;q=0.9,*/*;q=0.8',
+  'accept-language': 'he-IL,he;q=0.9,en;q=0.8',
+};
+/** How many HTML pages deep we follow from the emailed link looking for the actual PDF (a download page). */
+const MAX_PAGE_DEPTH = 2;
+const MAX_PAGE_CANDIDATES = 4;
+
+/** The PDF inside a body: `%PDF-` within the first 1024 bytes (some servers send a short preamble). */
+function pdfFrom(buf: Buffer): Buffer | null {
+  const at = buf.subarray(0, 1024).indexOf('%PDF-', 0, 'latin1');
+  return at < 0 ? null : at === 0 ? buf : buf.subarray(at);
+}
+
 /**
- * Downloads a PDF from an emailed link, refusing internal addresses (SSRF).
+ * Where an HTML landing page sends the browser for the document: a meta refresh or script redirect, an
+ * embedded viewer (iframe/embed/object), or a link that looks like the PDF download. Absolute, deduped, in
+ * that order of preference.
+ */
+export function pdfCandidatesFromHtml(html: string, base: string): string[] {
+  const out: string[] = [];
+  const add = (raw: string | undefined) => {
+    if (!raw) return;
+    const v = decodeEntities(raw.trim()).replace(/\\\//g, '/');
+    if (!v || /^(javascript|mailto|tel|data):/i.test(v) || v.startsWith('#')) return;
+    let u: string;
+    try { u = new URL(v, base).toString(); } catch { return; }
+    if (!/^https?:/i.test(u) || u === base || out.includes(u)) return;
+    out.push(u);
+  };
+  for (const m of html.matchAll(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*>/gi)) {
+    add(m[0].match(/content\s*=\s*["'][^"']*?url\s*=\s*['"]?([^"'>\s]+)/i)?.[1]);
+  }
+  for (const m of html.matchAll(/(?:window\.|document\.)?location(?:\.href)?\s*(?:=|\.replace\(|\.assign\()\s*["']([^"']+)["']/gi)) add(m[1]);
+  for (const m of html.matchAll(/<(?:iframe|embed|frame)\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)) add(m[1]);
+  for (const m of html.matchAll(/<object\b[^>]*?\bdata\s*=\s*["']([^"']+)["']/gi)) add(m[1]);
+  const anchors = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi;
+  const pdfish = /\.pdf\b|[?&/](?:pdf|download)\b|format=pdf|type=pdf/i;
+  for (const m of html.matchAll(anchors)) {
+    const href = m[1] ?? m[2] ?? '';
+    const tag = m[0].slice(0, m[0].indexOf('>') + 1);
+    const label = m[3].replace(/<[^>]*>/g, ' ');
+    if (DROP.test(href) || DROP.test(label)) continue;
+    if (pdfish.test(href) || /\bdownload\b/i.test(tag) || /pdf|הורד|download/i.test(label)) add(href);
+  }
+  for (const m of html.matchAll(/["'](https?:\/\/[^"'\s<>]+?\.pdf(?:\?[^"'\s<>]*)?)["']/gi)) add(m[1]);
+  return out.slice(0, MAX_PAGE_CANDIDATES);
+}
+
+interface Fetched { body: Buffer; contentType: string; url: string }
+
+/** One GET with SSRF checks on every hop, manual redirects, a per-host cookie jar and a size cap. */
+async function fetchSafe(
+  start: URL, opts: DownloadOptions, jar: Map<string, Map<string, string>>, signal: AbortSignal,
+): Promise<Fetched> {
+  const resolve = opts.resolve ?? defaultResolve;
+  const doFetch = opts.fetchImpl ?? fetch;
+  const maxBytes = opts.maxBytes ?? 20 * 1024 * 1024;
+  let current = start;
+  for (let hop = 0; ; hop++) {
+    await assertSafe(current, resolve);
+    const headers: Record<string, string> = { ...BROWSER_HEADERS };
+    const cookies = jar.get(current.hostname);
+    if (cookies?.size) headers.cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+    if (opts.headersFor && opts.headersFor.hosts.test(current.hostname)) Object.assign(headers, opts.headersFor.headers);
+    const res = await doFetch(current.toString(), { redirect: 'manual', signal, headers });
+    const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    for (const c of setCookies) {
+      const pair = c.split(';', 1)[0];
+      const eq = pair.indexOf('=');
+      if (eq <= 0) continue;
+      if (!jar.has(current.hostname)) jar.set(current.hostname, new Map());
+      jar.get(current.hostname)!.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      await res.body?.cancel().catch(() => {});
+      if (!loc) throw new LinkError('link_failed', 'redirect without location');
+      if (hop >= MAX_REDIRECTS) throw new LinkError('link_failed', 'too many redirects');
+      try {
+        current = new URL(loc, current);
+      } catch {
+        throw new LinkError('link_failed', 'bad redirect location');
+      }
+      continue;
+    }
+    if (res.status < 200 || res.status >= 300) {
+      await res.body?.cancel().catch(() => {});
+      throw new LinkError('link_failed', `http ${res.status}`);
+    }
+    const declared = Number(res.headers.get('content-length'));
+    if (declared > maxBytes) {
+      await res.body?.cancel().catch(() => {});
+      throw new LinkError('link_too_large', 'content-length over limit');
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    if (res.body) {
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new LinkError('link_too_large', 'body over limit');
+        }
+        chunks.push(Buffer.from(value));
+      }
+    }
+    return { body: Buffer.concat(chunks), contentType: (res.headers.get('content-type') ?? '').toLowerCase(), url: current.toString() };
+  }
+}
+
+/**
+ * Downloads a PDF from an emailed link, refusing internal addresses (SSRF). When the link opens an HTML page
+ * (a "download your invoice" landing page, a viewer, a script redirect), the page is searched for the PDF
+ * and up to MAX_PAGE_DEPTH pages are followed; every hop goes through the same address checks.
  *
  * Known limit (accepted for v1): we resolve DNS to vet the host, then fetch resolves it again,
  * so a hostile DNS server could answer differently the second time (TOCTOU / DNS rebinding).
  * Closing it needs a pinned-IP connection agent, which we deliberately do not build.
  */
 export async function downloadPdf(url: string, opts: DownloadOptions = {}): Promise<Buffer> {
-  const resolve = opts.resolve ?? defaultResolve;
-  const doFetch = opts.fetchImpl ?? fetch;
-  const maxBytes = opts.maxBytes ?? 20 * 1024 * 1024;
-  const timeoutMs = opts.timeoutMs ?? 20_000;
-  const signal = AbortSignal.timeout(timeoutMs);
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? 30_000);
+  const jar = new Map<string, Map<string, string>>();
 
-  try {
+  const visit = async (target: string, depth: number): Promise<Buffer> => {
     // A known viewer link is swapped for the vendor's document address; everything below still applies.
-    const known = knownViewer(url);
-    let current: URL;
+    const known = knownViewer(target);
+    let start: URL;
     try {
-      current = new URL(known?.apiUrl ?? url);
+      start = new URL(known?.apiUrl ?? target);
     } catch {
       throw new LinkError('link_blocked', 'invalid url');
     }
-    for (let hop = 0; ; hop++) {
-      await assertSafe(current, resolve);
-      const extra = opts.headersFor && opts.headersFor.hosts.test(current.hostname) ? opts.headersFor.headers : undefined;
-      const res = await doFetch(current.toString(), { redirect: 'manual', signal, ...(extra ? { headers: extra } : {}) });
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get('location');
-        await res.body?.cancel().catch(() => {});
-        if (!loc) throw new LinkError('link_failed', 'redirect without location');
-        if (hop >= MAX_REDIRECTS) throw new LinkError('link_failed', 'too many redirects');
-        try {
-          current = new URL(loc, current);
-        } catch {
-          throw new LinkError('link_failed', 'bad redirect location');
-        }
-        continue;
+    const got = await fetchSafe(start, opts, jar, signal);
+    const raw = known ? known.viewer.extract(got.body) : got.body;
+    const pdf = pdfFrom(raw);
+    if (pdf) return pdf;
+    const looksHtml = /html/.test(got.contentType) || /^\s*(<!doctype|<html|<head|<body|<meta|<script)/i.test(raw.subarray(0, 512).toString('latin1'));
+    if (known || !looksHtml || depth >= MAX_PAGE_DEPTH) throw new LinkError('link_not_pdf', 'not a PDF');
+    const candidates = pdfCandidatesFromHtml(raw.toString('utf8'), got.url);
+    if (candidates.length === 0) throw new LinkError('link_not_pdf', 'not a PDF (page has no document link)');
+    let firstErr: unknown = null;
+    for (const next of candidates) {
+      try {
+        return await visit(next, depth + 1);
+      } catch (err) {
+        if (err instanceof LinkError && err.code === 'link_blocked') throw err;
+        firstErr ??= err;
       }
-      if (res.status < 200 || res.status >= 300) {
-        await res.body?.cancel().catch(() => {});
-        throw new LinkError('link_failed', `http ${res.status}`);
-      }
-      const declared = Number(res.headers.get('content-length'));
-      if (declared > maxBytes) {
-        await res.body?.cancel().catch(() => {});
-        throw new LinkError('link_too_large', 'content-length over limit');
-      }
-      const chunks: Buffer[] = [];
-      let total = 0;
-      if (res.body) {
-        const reader = res.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          total += value.byteLength;
-          if (total > maxBytes) {
-            await reader.cancel().catch(() => {});
-            throw new LinkError('link_too_large', 'body over limit');
-          }
-          chunks.push(Buffer.from(value));
-        }
-      }
-      const raw = Buffer.concat(chunks);
-      const buf = known ? known.viewer.extract(raw) : raw;
-      if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new LinkError('link_not_pdf', 'not a PDF');
-      return buf;
     }
+    throw firstErr;
+  };
+
+  try {
+    return await visit(url, 0);
   } catch (err) {
     if (err instanceof LinkError) throw err;
     throw new LinkError('link_failed', (err as Error).message);

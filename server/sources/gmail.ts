@@ -342,9 +342,9 @@ function pdfName(name: string): string {
 }
 
 /**
- * Ingests one Gmail message: PDFs become items; with no PDF attachment, JPEG/PNG attachments become one-page
- * PDFs; with neither, a Meta ads receipt email gets Meta's PDF or one built from the email (see meta.ts), and
- * other emails have their invoice links downloaded;
+ * Ingests one Gmail message: PDFs become items; with no PDF attachment, a Meta ads receipt email gets Meta's
+ * PDF or one built from the email (see meta.ts), other emails have their invoice links downloaded, and only
+ * when no link gives a PDF do JPEG/PNG attachments become one-page PDFs;
  * if nothing usable is found a placeholder item keeps the email visible. Already-ingested ids are skipped.
  */
 export async function ingestMessage(
@@ -358,34 +358,36 @@ export async function ingestMessage(
   // An attachment called .pdf that is not one (no %PDF- header) is never stored as a document.
   let pdfs: { name: string; data: Buffer; note?: string }[] = msg.pdfs.filter((p) => isPdf(p.data));
   const notPdf = msg.pdfs.filter((p) => !isPdf(p.data));
-  if (msg.pdfs.length === 0) {
-    for (const img of msg.images ?? []) {
-      try { pdfs.push({ name: pdfName(img.name), data: imageToPdf(img.data) }); } catch (e) {
-        if (!(e instanceof ImageError)) throw e;
-        notPdf.push(img); // a broken image stays visible as a placeholder, like a fake .pdf
-      }
-    }
-  }
   let failure: Reason | null = null;
   let failureDetail: string | undefined;
-  const meta = pdfs.length === 0 && notPdf.length === 0 ? parseMetaReceipt(msg.html) : null;
-  if (meta) {
-    pdfs = [await metaReceiptDocument(meta, msg.receivedAt, downloadOpts)];
-  } else if (pdfs.length === 0 && notPdf.length === 0) {
-    const got: { name: string; data: Buffer }[] = [];
-    for (const url of findInvoiceLinks(msg.html, msg.text)) {
-      try {
-        got.push({ name: 'link.pdf', data: await downloadPdf(url, downloadOpts) });
-        break; // R20: the first successful PDF wins
-      } catch (e) {
-        if (!failure) {
-          failure = e instanceof LinkError ? e.code : 'link_failed';
-          failureDetail = `${linkHost(url)} - ${e instanceof Error ? e.message : String(e)}`;
+  if (msg.pdfs.length === 0) {
+    // No PDF attached: the invoice is behind a link (Meta, Morning, Kvish 6...). Links go before images, since
+    // an email that links its invoice usually also carries a banner or logo image that is not the invoice.
+    const meta = parseMetaReceipt(msg.html);
+    if (meta) {
+      pdfs = [await metaReceiptDocument(meta, msg.receivedAt, downloadOpts)];
+    } else {
+      for (const url of findInvoiceLinks(msg.html, msg.text)) {
+        try {
+          pdfs.push({ name: 'link.pdf', data: await downloadPdf(url, downloadOpts) });
+          break; // R20: the first successful PDF wins
+        } catch (e) {
+          if (!failure) {
+            failure = e instanceof LinkError ? e.code : 'link_failed';
+            failureDetail = `${linkHost(url)} - ${e instanceof Error ? e.message : String(e)}`;
+          }
         }
       }
     }
-    pdfs = got;
-    if (got.length === 0) failure ??= 'no_document';
+    if (pdfs.length === 0) {
+      for (const img of msg.images ?? []) {
+        try { pdfs.push({ name: pdfName(img.name), data: imageToPdf(img.data) }); } catch (e) {
+          if (!(e instanceof ImageError)) throw e;
+          notPdf.push(img); // a broken image stays visible as a placeholder, like a fake .pdf
+        }
+      }
+    }
+    if (pdfs.length === 0 && notPdf.length === 0) failure ??= 'no_document';
   }
   // All-or-nothing: an email row without its items must never persist.
   return getDb().transaction(() => {

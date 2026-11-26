@@ -56,6 +56,8 @@ test('visualOrder: Hebrew-first lines reverse, numbers and Latin words stay read
 test('normalizeCookies accepts a Cookie header or one cookie per line', () => {
   assert.equal(normalizeCookies('Cookie: c_user=1; xs=abc%3A2'), 'c_user=1; xs=abc%3A2');
   assert.equal(normalizeCookies('c_user=1\nxs=abc\n\njunk'), 'c_user=1; xs=abc');
+  assert.equal(normalizeCookies('c_user=1, xs=abc%3A2'), 'c_user=1; xs=abc%3A2');
+  assert.equal(normalizeCookies('c_user\t100012345678901\t.facebook.com\t/\nxs\t12%3AaBc\t.facebook.com\t/'), 'c_user=100012345678901; xs=12%3AaBc');
 });
 
 test('without Facebook cookies the PDF is built from the email and noted', async () => {
