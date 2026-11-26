@@ -39,7 +39,7 @@ const STARTER_RECIPES = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 
 /** Brings the current database (a tenant's, or the default one) up to date for this boot. Safe on every start. */
 export function prepareTenantDb(recipesDir = STARTER_RECIPES): void {
-  loadStarterRecipes(recipesDir); // only vendors without any recipe: never replaces a learned or edited one
+  loadStarterRecipes(recipesDir); // new vendors, and fixes to untouched starters: never replaces a learned or edited one
   markInterruptedBackfill(); // a backfill job lives in memory: one running before this boot was cut short
 }
 

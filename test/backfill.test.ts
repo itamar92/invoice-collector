@@ -96,7 +96,7 @@ test('startBackfill ingests as backfill, stops at approval, never touches storag
 
 test('labelled is true when a gmail label is set', async () => {
   setup();
-  updateSettings({ gmailLabel: 'invoices' });
+  updateSettings({ gmailLabels: ['invoices'] });
   const queries: { after: string; labelled: boolean }[] = [];
   await startBackfill(gmailWith({}, queries), mkDeps(fakeStorage(), null));
   assert.equal(queries[0].labelled, true);

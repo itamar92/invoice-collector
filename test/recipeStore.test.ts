@@ -97,6 +97,23 @@ test('loadStarterRecipes is idempotent, sorted, applies sidecar categories, repo
   assert.throws(() => loadStarterRecipes(dir), /c\.json/);
 });
 
+test('loadStarterRecipes ships a fixed starter to vendors still on the untouched starter, never over a user/AI one', () => {
+  openDb(':memory:');
+  const dir = mkdtempSync(join(tmpdir(), 'recipes-'));
+  writeFileSync(join(dir, 'a.json'), JSON.stringify(recipe({ vendorKey: 'vendor-a', displayName: 'A' })));
+  writeFileSync(join(dir, 'b.json'), JSON.stringify(recipe({ vendorKey: 'vendor-b', displayName: 'B' })));
+  loadStarterRecipes(dir);
+  saveRecipe(recipe({ vendorKey: 'vendor-b', displayName: 'B', description: 'mine' }), 'user');
+  writeFileSync(join(dir, 'a.json'), JSON.stringify(recipe({ vendorKey: 'vendor-a', displayName: 'A', description: 'fixed' })));
+  writeFileSync(join(dir, 'b.json'), JSON.stringify(recipe({ vendorKey: 'vendor-b', displayName: 'B', description: 'fixed' })));
+  assert.equal(loadStarterRecipes(dir), 0); // updates are not new vendors
+  assert.deepEqual(recipeHistory('vendor-a').map((h) => [h.version, h.source, h.recipe.description]),
+    [[2, 'starter', 'fixed'], [1, 'starter', undefined]]);
+  assert.equal(recipeHistory('vendor-b')[0].recipe.description, 'mine');
+  loadStarterRecipes(dir);
+  assert.equal(recipeHistory('vendor-a').length, 2); // unchanged file: no new version
+});
+
 test('findRecipe skips (and logs without content) an active row that no longer compiles', (t) => {
   openDb(':memory:');
   saveRecipe(recipe(), 'starter');

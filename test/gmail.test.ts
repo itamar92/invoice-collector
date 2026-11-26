@@ -206,7 +206,7 @@ const isToken = (c: Call) => c.url.includes('oauth2.googleapis.com/token');
 const q = (c: Call) => new URL(c.url).searchParams.get('q');
 
 test('query strings: labelled and unlabelled, all pages followed', async () => {
-  updateSettings({ gmailLabel: 'Invoices' });
+  updateSettings({ gmailLabels: ['Invoices'] });
   const f = fakeFetch((c) => {
     if (isToken(c)) return json(200, { access_token: 'AT', expires_in: 3600 });
     return new URL(c.url).searchParams.get('pageToken')
@@ -222,7 +222,10 @@ test('query strings: labelled and unlabelled, all pages followed', async () => {
   assert.ok(!INVOICE_QUERY.includes('filename:pdf'), 'a PDF attachment alone is not enough');
   assert.ok(INVOICE_QUERY.includes('-subject:"הצעת מחיר"') && INVOICE_QUERY.includes('-subject:פוליסה'));
   assert.ok(INVOICE_QUERY.endsWith('-in:sent -in:chats'));
-  assert.equal(getSettings().gmailLabel, 'Invoices');
+  assert.deepEqual(getSettings().gmailLabels, ['Invoices']);
+  updateSettings({ gmailLabels: ['Invoices', 'קבלות - Recipts'] });
+  await gc.listCandidateMessages({ after: '2026/01/01', labelled: true });
+  assert.equal(q(f.calls[5]), '(label:"Invoices" OR label:"קבלות - Recipts") after:2026/01/01 -label:"invoice-collector/done"');
 });
 
 test('fetchMessage walks MIME parts, decodes PDFs, bare lowercase sender', async () => {

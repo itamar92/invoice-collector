@@ -17,13 +17,14 @@ export interface MissedRow {
 const clean = (s: string) => s.replace(/["\\]/g, '');
 
 /**
- * Missed-by-label scan (spec §4.5a): messages that look like invoices but lack the user's label. Needs a label.
+ * Missed-by-label scan (spec §4.5a): messages that look like invoices but have none of the user's labels. Needs one.
  * Nothing is processed; unseen ids are recorded as `open`. `after` is YYYY-MM-DD. Returns how many were added.
  */
 export async function scanMissed(gmail: GmailSource, after: string): Promise<number> {
-  const label = getSettings().gmailLabel;
-  if (!label) return 0;
-  const q = `${invoiceQuery(knownVendorSenders())} -label:"${clean(label)}" -label:"${DONE_LABEL}" after:${after.replaceAll('-', '/')}`;
+  const labels = getSettings().gmailLabels;
+  if (labels.length === 0) return 0;
+  const without = labels.map((l) => `-label:"${clean(l)}"`).join(' ');
+  const q = `${invoiceQuery(knownVendorSenders())} ${without} -label:"${DONE_LABEL}" after:${after.replaceAll('-', '/')}`;
   const db = getDb();
   const known = db.prepare('SELECT 1 FROM missed WHERE message_id = ?').pluck();
   let added = 0;

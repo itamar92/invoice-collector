@@ -310,9 +310,10 @@ const HOW: MessageKey[] = ['label.how1', 'label.how2', 'label.how3', 'label.how4
 
 export function LabelSection() {
   const { s, save } = useSettings();
-  const current = s.settings.gmailLabel;
-  const [useLabel, setUseLabel] = useState(current !== null || !s.settings.setupComplete) // label is the recommended default;
-  const [label, setLabel] = useState(current ?? '');
+  const current = s.settings.gmailLabels;
+  const [useLabel, setUseLabel] = useState(current.length > 0 || !s.settings.setupComplete); // labels are the recommended default
+  const [chosen, setChosen] = useState<string[]>(current);
+  const [typed, setTyped] = useState('');
   const [labels, setLabels] = useState<string[] | null>(null);
   const [listError, setListError] = useState(false);
   const saving = useAction();
@@ -322,8 +323,18 @@ export function LabelSection() {
   };
   useEffect(() => { void load(); }, [s.secrets.gmail_refresh]);
 
-  const doSave = () => saving.run(() => save({ gmailLabel: useLabel ? label.trim() : null }));
-  const canSave = useLabel ? !!label.trim() && label.trim() !== current : current !== null;
+  const toggle = (l: string) => setChosen((c) => (c.includes(l) ? c.filter((x) => x !== l) : [...c, l]));
+  const addTyped = () => {
+    const l = typed.trim();
+    if (l && !chosen.includes(l)) setChosen([...chosen, l]);
+    setTyped('');
+  };
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+  const next = useLabel ? chosen : [];
+  const doSave = () => saving.run(() => save({ gmailLabels: next }));
+  const canSave = (!useLabel || chosen.length > 0) && !same(next, current);
+  // Labels typed by hand (or missing from Gmail's list) stay visible so they can be unticked.
+  const shown = [...(labels ?? []), ...chosen.filter((l) => !(labels ?? []).includes(l))];
 
   return (
     <div className="space-y-4">
@@ -345,19 +356,29 @@ export function LabelSection() {
         </label>
         {useLabel && (
           <div className="space-y-2 ps-6">
-            {labels && labels.length > 0 && (
-              <Field label={t('label.pick')}>
-                <select className={inputCls} value={labels.includes(label) ? label : ''} onChange={(e) => setLabel(e.target.value)}>
-                  <option value="">{t('label.choose')}</option>
-                  {labels.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </Field>
+            {shown.length > 0 && (
+              <div>
+                <p className="mb-1 text-[13px] font-semibold">{t('label.pick')}</p>
+                <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-line p-2">
+                  {shown.map((l) => (
+                    <label key={l} className="flex min-h-8 items-center gap-2 text-sm">
+                      <input type="checkbox" className="size-4" checked={chosen.includes(l)} onChange={() => toggle(l)} />
+                      <span dir="auto" className="break-all">{l}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             )}
             {listError && <p className="rounded-lg bg-warn-tint px-2 py-1 text-xs">{t('label.listUnavailable')}</p>}
             <Field label={t('label.typeIt')}>
-              <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
+              <div className="flex gap-2">
+                <input className={inputCls} value={typed} onChange={(e) => setTyped(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } }} />
+                <Button variant="secondary" disabled={!typed.trim()} onClick={addTyped}>{t('label.add')}</Button>
+              </div>
             </Field>
             <Button variant="ghost" onClick={() => void load()}>{t('label.refresh')}</Button>
+            <p className={hintCls}>{t('label.anyNote')}</p>
             <p className={hintCls}>{t('label.missedNote')}</p>
           </div>
         )}
@@ -369,7 +390,7 @@ export function LabelSection() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={!canSave} onClick={doSave}>{saving.busy ? t('common.saving') : t('common.save')}</Button>
-        <span className="text-sm text-muted">{current ? t('label.current', { label: current }) : t('label.currentAll')}</span>
+        <span className="text-sm text-muted">{current.length ? t('label.current', { label: current.join(', ') }) : t('label.currentAll')}</span>
       </div>
       <ErrorText>{saving.error}</ErrorText>
     </div>

@@ -43,7 +43,7 @@ test('scanMissed with no label returns 0 and runs no query', async () => {
 });
 
 test('scanMissed builds the query, records open rows, skips known and ingested ids, processes nothing', async () => {
-  updateSettings({ gmailLabel: 'invoices' });
+  updateSettings({ gmailLabels: ['invoices'] });
   createEmail({ messageId: 'old', threadId: 't', sender: 's', subject: 's', receivedAt: '2026-01-02T00:00:00Z', mode: 'ongoing' });
   const g = fake(['a', 'b', 'old']);
   assert.equal(await scanMissed(g, '2026-01-01'), 2);
@@ -57,7 +57,7 @@ test('scanMissed builds the query, records open rows, skips known and ingested i
 });
 
 test('queueMissed ingests as manual and marks queued; hideMissed hides', async () => {
-  updateSettings({ gmailLabel: 'invoices' });
+  updateSettings({ gmailLabels: ['invoices'] });
   const g = fake(['a', 'b']);
   await scanMissed(g, '2026-01-01');
   await queueMissed(g, 'a', deps());

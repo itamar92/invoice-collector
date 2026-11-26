@@ -107,13 +107,21 @@ export default function ItemDetail() {
       setReparseNote({ tone: r.outcome === 'updated' || r.outcome === 'same' ? 'ok' : 'warn', text: t(`item.reparse.${r.outcome}` as MessageKey) });
     }, 'reparse');
   };
-  const retry = () => act.run(async () => { await api.retry(item.id); await leave(t('item.retriedNamed', { name: itemTitle(item) })); }, 'retry');
+  const retry = () => act.run(async () => {
+    const r = await api.retry(item.id);
+    // An item without a document was read from Gmail again right away: say whether that found it.
+    if (r.refetched === undefined) await leave(t('item.retriedNamed', { name: itemTitle(item) }));
+    else if (r.refetched > 0) await leave(t('item.refetchedNamed', { name: itemTitle(item) }));
+    else await refresh(t('item.refetchFailed'));
+  }, 'retry');
   // Set aside as the receipt of a tax invoice already on file (only the invoice counts as the expense).
   const invoiceOf = item.state === 'ignored'
     ? item.events.map((e) => /^receipt_of_invoice:(.+)$/.exec(e.note ?? '')?.[1]).filter(Boolean).pop() ?? null
     : null;
   // Meta's own receipt PDF could not be downloaded, so this document was built from the receipt email.
   const madeFromEmail = item.events.some((e) => (e.note ?? '').startsWith('made_from_email:'));
+  // Built from the vendor's own invoice data because its PDF needs a login (Kvish 6).
+  const madeFromVendorData = item.events.some((e) => (e.note ?? '') === 'made_from_vendor_data:kvish6');
   const keepReceipt = () => act.run(async () => {
     await api.keepReceipt(item.id);
     await leave(t('item.receiptKeptNamed', { name: itemTitle(item) }));
@@ -165,6 +173,7 @@ export default function ItemDetail() {
       {uploaded && !msg && !(uploaded === 'new' && item.state === 'needs_attention') && <Notice tone={uploaded === 'new' ? 'ok' : 'warn'}>{t(`upload.${uploaded}`)}</Notice>}
       {msg && <Notice tone="ok">{msg}</Notice>}
       {madeFromEmail && <Notice tone="warn">{t('item.madeFromEmail')}</Notice>}
+      {madeFromVendorData && <Notice tone="warn">{t('item.madeFromKvish6')}</Notice>}
       {invoiceOf && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-info-tint px-3 py-2 text-sm">
           <span>{t('item.receiptSetAside')}</span>

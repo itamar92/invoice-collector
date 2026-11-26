@@ -32,7 +32,7 @@ const deps = (): Deps => ({
   accounting: null, ai: null, settings: { ...IL_DEFAULTS, storageRoot: '/Inv' }, now: () => NOW,
   extractText: async () => ({ text: '', pages: 1, isScan: false }),
 });
-const ready = () => updateSettings({ setupComplete: true, backfillDone: true, gmailLabel: 'inv' });
+const ready = () => updateSettings({ setupComplete: true, backfillDone: true, gmailLabels: ['inv'] });
 const mkItem = (mid: string, n: string) => {
   createEmail({ messageId: mid, threadId: 't', sender: 's', subject: 's', receivedAt: NOW.toISOString(), mode: 'ongoing' });
   return createItem(mid, 'a.pdf', Buffer.from(`%PDF ${n}`)).id;

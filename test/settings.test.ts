@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb, migrate, MIGRATIONS } from '../server/db.js';
+import { getDb, openDb, migrate, MIGRATIONS } from '../server/db.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 import { getSettings, updateSettings } from '../server/settings.js';
 
@@ -16,8 +16,8 @@ test('defaults come from IL_DEFAULTS until changed', () => {
 
 test('settings persist per database and IL_DEFAULTS is never mutated', () => {
   openDb(':memory:');
-  updateSettings({ gmailLabel: 'invoices' });
-  assert.equal(getSettings().gmailLabel, 'invoices');
+  updateSettings({ gmailLabels: ['invoices'] });
+  assert.deepEqual(getSettings().gmailLabels, ['invoices']);
   const cats = getSettings().categories.map(c => c.name === 'רכב - דלק' ? { ...c, sendToAccounting: false } : c);
   updateSettings({ categories: cats });
   assert.equal(getSettings().categories.find(c => c.name === 'רכב - דלק')!.sendToAccounting, false);
@@ -26,7 +26,19 @@ test('settings persist per database and IL_DEFAULTS is never mutated', () => {
   getSettings().categories[0].name = 'x';
   assert.notEqual(IL_DEFAULTS.categories[0].name, 'x');
   openDb(':memory:');
-  assert.equal(getSettings().gmailLabel, null);
+  assert.deepEqual(getSettings().gmailLabels, []);
+});
+
+test('a single label stored the old way (gmailLabel) is read as a one-item list, and saving drops it', () => {
+  openDb(':memory:');
+  getDb().prepare("INSERT INTO settings (key, value) VALUES ('gmailLabel', ?)").run(JSON.stringify('n8n/Recipts'));
+  assert.deepEqual(getSettings().gmailLabels, ['n8n/Recipts']);
+  updateSettings({ gmailLabels: ['n8n/Recipts', 'קבלות - Recipts'] });
+  assert.deepEqual(getSettings().gmailLabels, ['n8n/Recipts', 'קבלות - Recipts']);
+  assert.equal(getDb().prepare("SELECT COUNT(*) FROM settings WHERE key = 'gmailLabel'").pluck().get(), 0);
+  openDb(':memory:');
+  getDb().prepare("INSERT INTO settings (key, value) VALUES ('gmailLabel', 'null')").run();
+  assert.deepEqual(getSettings().gmailLabels, []);
 });
 
 test('migrate is idempotent: re-running on the same database changes nothing', () => {

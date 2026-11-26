@@ -16,7 +16,8 @@ export type Settings = {
   currency: string;
   currencyLabel: string;
   vatRate: number;
-  gmailLabel: string | null;
+  /** Gmail labels to read (any of them); empty = scan every email that looks like an invoice. */
+  gmailLabels: string[];
   /** OAuth scopes granted for Gmail (not a secret); the UI checks it for gmail.send. */
   gmailScopes: string[];
   storageProvider: StorageProvider;
@@ -61,6 +62,12 @@ export function getSettings(): Settings {
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
   const out: Record<string, unknown> = structuredClone(IL_DEFAULTS);
   for (const r of rows) if (r.key in IL_DEFAULTS) out[r.key] = JSON.parse(r.value);
+  // Before several labels were allowed, one was stored as gmailLabel (string or null).
+  const legacy = rows.find((r) => r.key === 'gmailLabel');
+  if (legacy && !rows.some((r) => r.key === 'gmailLabels')) {
+    const one = JSON.parse(legacy.value) as unknown;
+    out.gmailLabels = typeof one === 'string' && one.trim() !== '' ? [one.trim()] : [];
+  }
   return out as Settings;
 }
 
@@ -74,6 +81,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
       if (!(k in IL_DEFAULTS) || v === undefined) continue;
       upsert.run(k, JSON.stringify(v));
     }
+    if (patch.gmailLabels !== undefined) db.prepare("DELETE FROM settings WHERE key = 'gmailLabel'").run();
   })();
   return getSettings();
 }

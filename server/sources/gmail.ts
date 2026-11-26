@@ -3,13 +3,14 @@ import { getSecret } from '../secrets.js';
 import { getSettings } from '../settings.js';
 import { TransientError } from '../core/types.js';
 import type { Reason } from '../core/types.js';
-import { createEmail, createItem, createPlaceholderItem, getEmail, isTerminal, listItems } from '../core/items.js';
+import { createEmail, createItem, createPlaceholderItem, getEmail, getItem, isTerminal, listItems, transition } from '../core/items.js';
 import { clearIngestFailure } from '../core/ingestFailures.js';
 import { knownVendorSenders } from '../core/recipeStore.js';
 import { ImageError, imageToPdf } from '../core/imagePdf.js';
 import { LinkError, downloadPdf, findInvoiceLinks } from './links.js';
 import type { DownloadOptions } from './links.js';
 import { metaReceiptDocument, parseMetaReceipt } from './meta.js';
+import { kvish6Document, kvish6InvoiceId } from './kvish6.js';
 
 /**
  * Without a label: only mail that names a tax document (חשבונית מס, חשבונית מס קבלה, קבלה, or the English
@@ -94,6 +95,13 @@ export function gmailDate(d: Date): string {
 
 const quote = (s: string) => s.replace(/["\\]/g, '');
 
+/** Mail that has any of the labels: `label:"a"` or `(label:"a" OR label:"b")`. */
+export function labelQuery(labels: string[]): string {
+  if (labels.length === 0) throw new Error('no Gmail label is set');
+  const terms = labels.map((l) => `label:"${quote(l)}"`);
+  return terms.length === 1 ? terms[0] : `(${terms.join(' OR ')})`;
+}
+
 export class GmailClient implements GmailSource {
   private readonly f: typeof fetch;
   private readonly now: () => number;
@@ -108,9 +116,7 @@ export class GmailClient implements GmailSource {
   async listCandidateMessages(opts: { after: string; labelled: boolean }): Promise<string[]> {
     let q: string;
     if (opts.labelled) {
-      const label = getSettings().gmailLabel;
-      if (!label) throw new Error('gmailLabel is not set');
-      q = `label:"${quote(label)}" after:${opts.after}`;
+      q = `${labelQuery(getSettings().gmailLabels)} after:${opts.after}`;
     } else {
       q = `${invoiceQuery(knownVendorSenders())} after:${opts.after}`;
     }
@@ -341,41 +347,41 @@ function pdfName(name: string): string {
   return `${name.replace(/\.(jpe?g|png)$/i, '') || 'image'}.pdf`;
 }
 
+type FoundDoc = { name: string; data: Buffer; note?: string };
+type Found = { pdfs: FoundDoc[]; notPdf: { name: string; data: Buffer }[]; failure: Reason | null; failureDetail?: string };
+
 /**
- * Ingests one Gmail message: PDFs become items; with no PDF attachment, a Meta ads receipt email gets Meta's
- * PDF or one built from the email (see meta.ts), other emails have their invoice links downloaded, and only
- * when no link gives a PDF do JPEG/PNG attachments become one-page PDFs;
- * if nothing usable is found a placeholder item keeps the email visible. Already-ingested ids are skipped.
+ * The documents in a fetched message: PDF attachments; with none, a Meta ads receipt email gets Meta's PDF or one
+ * built from the email (meta.ts), a Kvish 6 email one built from its invoice data (kvish6.ts), other emails have
+ * their invoice links downloaded, and only when no link gives a PDF do JPEG/PNG attachments become one-page PDFs.
  */
-export async function ingestMessage(
-  gmail: GmailSource, id: string, mode: 'ongoing' | 'backfill' | 'manual', downloadOpts?: DownloadOptions,
-): Promise<{ skipped: boolean; items: number }> {
-  if (getEmail(id) && listItems({ messageId: id, limit: 1 }).length > 0) {
-    clearIngestFailure(id);
-    return { skipped: true, items: 0 };
-  }
-  const msg = await gmail.fetchMessage(id);
+async function findDocuments(msg: GmailMessage, downloadOpts?: DownloadOptions): Promise<Found> {
   // An attachment called .pdf that is not one (no %PDF- header) is never stored as a document.
-  let pdfs: { name: string; data: Buffer; note?: string }[] = msg.pdfs.filter((p) => isPdf(p.data));
+  const pdfs: FoundDoc[] = msg.pdfs.filter((p) => isPdf(p.data));
   const notPdf = msg.pdfs.filter((p) => !isPdf(p.data));
   let failure: Reason | null = null;
   let failureDetail: string | undefined;
+  const fail = (e: unknown, host: string) => {
+    if (failure) return;
+    failure = e instanceof LinkError ? e.code : 'link_failed';
+    failureDetail = `${host} - ${e instanceof Error ? e.message : String(e)}`;
+  };
   if (msg.pdfs.length === 0) {
     // No PDF attached: the invoice is behind a link (Meta, Morning, Kvish 6...). Links go before images, since
     // an email that links its invoice usually also carries a banner or logo image that is not the invoice.
     const meta = parseMetaReceipt(msg.html);
+    const kvish6 = meta ? null : kvish6InvoiceId(msg.html, msg.text);
     if (meta) {
-      pdfs = [await metaReceiptDocument(meta, msg.receivedAt, downloadOpts)];
+      pdfs.push(await metaReceiptDocument(meta, msg.receivedAt, downloadOpts));
+    } else if (kvish6) {
+      try { pdfs.push(await kvish6Document(kvish6, downloadOpts)); } catch (e) { fail(e, 'service.kvish6.co.il'); }
     } else {
       for (const url of findInvoiceLinks(msg.html, msg.text)) {
         try {
           pdfs.push({ name: 'link.pdf', data: await downloadPdf(url, downloadOpts) });
           break; // R20: the first successful PDF wins
         } catch (e) {
-          if (!failure) {
-            failure = e instanceof LinkError ? e.code : 'link_failed';
-            failureDetail = `${linkHost(url)} - ${e instanceof Error ? e.message : String(e)}`;
-          }
+          fail(e, linkHost(url));
         }
       }
     }
@@ -389,6 +395,22 @@ export async function ingestMessage(
     }
     if (pdfs.length === 0 && notPdf.length === 0) failure ??= 'no_document';
   }
+  return { pdfs, notPdf, failure, failureDetail };
+}
+
+/**
+ * Ingests one Gmail message (documents as in findDocuments); if nothing usable is found a placeholder item keeps
+ * the email visible. Already-ingested ids are skipped.
+ */
+export async function ingestMessage(
+  gmail: GmailSource, id: string, mode: 'ongoing' | 'backfill' | 'manual', downloadOpts?: DownloadOptions,
+): Promise<{ skipped: boolean; items: number }> {
+  if (getEmail(id) && listItems({ messageId: id, limit: 1 }).length > 0) {
+    clearIngestFailure(id);
+    return { skipped: true, items: 0 };
+  }
+  const msg = await gmail.fetchMessage(id);
+  const { pdfs, notPdf, failure, failureDetail } = await findDocuments(msg, downloadOpts);
   // All-or-nothing: an email row without its items must never persist.
   return getDb().transaction(() => {
     clearIngestFailure(id);
@@ -404,6 +426,33 @@ export async function ingestMessage(
     for (const p of pdfs) createItem(id, p.name, p.data, p.note);
     return { skipped: false, items: pdfs.length + notPdf.length };
   })();
+}
+
+/** Reasons of an item that never got a document: retrying them means reading the email again. */
+export const REFETCH_REASONS: readonly Reason[] = ['no_document', 'link_not_pdf', 'link_blocked', 'link_too_large', 'link_failed'];
+
+/**
+ * Retry of an item that has no document (its link failed, or nothing was found): reads the email again with the
+ * current code. Found documents become new items and the placeholder is dismissed; otherwise the placeholder
+ * stays in needs_attention with the new failure on its history. Returns the number of documents found.
+ */
+export async function refetchItem(
+  gmail: GmailSource, itemId: string, downloadOpts?: DownloadOptions,
+): Promise<{ found: number; failure: Reason | null; detail?: string }> {
+  const item = getItem(itemId);
+  if (!item) throw new Error(`Unknown item: ${itemId}`);
+  const msg = await gmail.fetchMessage(item.messageId);
+  const { pdfs, failure, failureDetail } = await findDocuments(msg, downloadOpts);
+  getDb().transaction(() => {
+    if (pdfs.length === 0) {
+      const reason = failure ?? 'no_document';
+      transition(itemId, 'needs_attention', reason, `manual_retry: ${failureDetail ? `${reason}: ${failureDetail}` : reason}`.slice(0, 500));
+      return;
+    }
+    for (const p of pdfs) createItem(item.messageId, p.name, p.data, p.note);
+    transition(itemId, 'dismissed', item.reason ?? undefined, 'refetched');
+  })();
+  return { found: pdfs.length, failure: pdfs.length ? null : failure ?? 'no_document', detail: failureDetail };
 }
 
 const linkHost = (url: string) => { try { return new URL(url).hostname; } catch { return 'link'; } };

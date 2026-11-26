@@ -173,7 +173,8 @@ export function recipeHistory(vendorKey: string): { version: number; source: str
 }
 
 /**
- * Inserts every starter recipe in `dir` (*.json, sorted by name) whose vendor has no recipe yet.
+ * Inserts every starter recipe in `dir` (*.json, sorted by name) whose vendor has no recipe yet, and updates a
+ * vendor whose active recipe is a starter that differs from the shipped file (never one written by AI or the user).
  * Optional `vendors.json` in the same folder maps vendorKey -> { displayName, defaultCategory }.
  * A recipe that fails validation throws with its file name: starter recipes are shipped code.
  * Returns the number inserted.
@@ -183,6 +184,9 @@ export function loadStarterRecipes(dir = 'recipes/il'): number {
   const sidecar: Record<string, { displayName?: string; defaultCategory?: string }> =
     existsSync(sidecarFile) ? JSON.parse(readFileSync(sidecarFile, 'utf8')) : {};
   const files = readdirSync(dir).filter(f => f.endsWith('.json') && f !== 'vendors.json').sort();
+  const active = getDb().prepare(
+    'SELECT source, json FROM recipes WHERE vendor_key = ? AND active = 1 ORDER BY id DESC LIMIT 1',
+  );
   const has = getDb().prepare('SELECT 1 FROM recipes WHERE vendor_key = ? LIMIT 1');
   let inserted = 0;
   for (const file of files) {
@@ -192,7 +196,14 @@ export function loadStarterRecipes(dir = 'recipes/il'): number {
     } catch (e) {
       throw new Error(`starter recipe ${file}: ${(e as Error).message}`);
     }
-    if (has.get(recipe.vendorKey)) continue;
+    if (has.get(recipe.vendorKey)) {
+      // A shipped fix reaches existing installs, but only while the vendor still runs the untouched starter.
+      const cur = active.get(recipe.vendorKey) as { source: string; json: string } | undefined;
+      if (cur?.source === 'starter' && JSON.stringify(compileRecipe(JSON.parse(cur.json))) !== JSON.stringify(recipe)) {
+        saveRecipe(recipe, 'starter');
+      }
+      continue;
+    }
     saveRecipe(recipe, 'starter');
     const category = sidecar[recipe.vendorKey]?.defaultCategory;
     if (category) setVendorCategory(recipe.vendorKey, category);

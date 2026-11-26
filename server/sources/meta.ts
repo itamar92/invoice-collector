@@ -141,7 +141,7 @@ export function normalizeCookies(raw: string): string {
 
 const require = createRequire(import.meta.url);
 let fonts: { regular: Uint8Array; bold: Uint8Array } | null = null;
-function fontBytes() {
+export function fontBytes() {
   fonts ??= {
     regular: readFileSync(require.resolve('@expo-google-fonts/heebo/400Regular/Heebo_400Regular.ttf')),
     bold: readFileSync(require.resolve('@expo-google-fonts/heebo/700Bold/Heebo_700Bold.ttf')),
