@@ -39,7 +39,7 @@ import type { SecretKey } from './secrets.js';
 import { getSettings, updateSettings } from './settings.js';
 import type { Settings } from './settings.js';
 import type { GmailSource } from './sources/gmail.js';
-import { REFETCH_REASONS, refetchItem } from './sources/gmail.js';
+import { refetchItem } from './sources/gmail.js';
 import { relayClient, relayConfig, RelayError, type RelayClient } from './sources/relayClient.js';
 import { telegramBotInfo } from './sources/telegram.js';
 import { createUpload, MAX_UPLOAD_BYTES, runUpload, UploadError } from './sources/upload.js';
@@ -349,9 +349,9 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
     if (item.state !== 'needs_attention') throw new HttpError(409, 'item_not_retryable');
-    // No document yet (its link failed, or none was found): queueing it again would only fail on "no pdf", so the
-    // email is read again with the current code instead.
-    if (item.reason && REFETCH_REASONS.includes(item.reason) && !getItemPdf(item.id)) {
+    // No document (its link failed, none was found, or an earlier retry queued it without one and it ended in
+    // "no pdf"): queueing it again would only fail the same way, so the email is read again with the current code.
+    if (!getItemPdf(item.id)) {
       const { gmail } = live();
       let r: Awaited<ReturnType<typeof refetchItem>>;
       try { r = await refetchItem(gmail, item.id); } catch {

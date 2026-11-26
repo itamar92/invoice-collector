@@ -428,9 +428,6 @@ export async function ingestMessage(
   })();
 }
 
-/** Reasons of an item that never got a document: retrying them means reading the email again. */
-export const REFETCH_REASONS: readonly Reason[] = ['no_document', 'link_not_pdf', 'link_blocked', 'link_too_large', 'link_failed'];
-
 /**
  * Retry of an item that has no document (its link failed, or nothing was found): reads the email again with the
  * current code. Found documents become new items and the placeholder is dismissed; otherwise the placeholder
