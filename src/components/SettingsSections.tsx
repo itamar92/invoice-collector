@@ -599,6 +599,24 @@ export function CategoriesSection() {
 }
 
 // ---------- general (settings page only) ----------
+/** New suppliers approved as business without asking, so every new invoice goes all the way to Morning. */
+function AutoApprove() {
+  const { s, save } = useSettings();
+  const a = useAction();
+  return (
+    <div className="space-y-1 border-t border-line pt-4">
+      <div className="text-sm font-semibold">{t('auto.title')}</div>
+      <label className="flex min-h-10 items-center gap-2 text-sm font-medium">
+        <input type="checkbox" className="size-5" checked={s.settings.autoApproveVendors} disabled={a.busy}
+          onChange={(e) => { const v = e.target.checked; void a.run(() => save({ autoApproveVendors: v })); }} />
+        {t('auto.label')}
+      </label>
+      <p className={hintCls}>{t('auto.hint')}</p>
+      <ErrorText>{a.error}</ErrorText>
+    </div>
+  );
+}
+
 export function GeneralSection() {
   const { s, save } = useSettings();
   const st = s.settings;
@@ -624,6 +642,7 @@ export function GeneralSection() {
         <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
+      <AutoApprove />
     </div>
   );
 }

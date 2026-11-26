@@ -963,3 +963,85 @@ test('items list: sorts by a column (empty values last) and filters by category,
   assert.deepEqual((await ids('year=2026&sort=date&dir=asc')), [a, b, d]);
   assert.equal((await call('GET', '/api/items?sort=bogus')).status, 400);
 });
+
+// ---------- removing a document that should not have been collected ----------
+
+test('remove: the file is deleted from the cloud, the Morning draft taken back, the document dismissed', async () => {
+  const removed: string[] = [];
+  const taken: string[] = [];
+  const d = deps();
+  d.storage = { ...d.storage, remove: async (p: string) => { removed.push(p); return 'removed' as const; } };
+  d.accounting = {
+    send: async () => ({ ref: 'x', mode: 'api_file' as const }),
+    remove: async (s) => { taken.push(s.ref); return { outcome: 'removed' as const }; },
+  };
+  const { call } = await boot({ getDeps: () => ({ deps: d, gmail }) });
+  const key = businessVendor();
+  const id = item('needs_attention', { category: 'תוכנה' });
+  setItemVendor(id, key);
+  updateItem(id, { storagePath: '/Inv/2026/a.pdf', accountingRef: 'expenses/k/a.pdf', accountingMode: 'api_file' });
+  transition(id, 'done');
+  const r = await call('POST', `/api/items/${id}/remove`, { ignoreVendor: true });
+  assert.equal(r.status, 200);
+  const body = await r.json() as any;
+  assert.equal(body.storage, 'removed');
+  assert.equal(body.morning, 'removed');
+  assert.deepEqual(removed, ['/Inv/2026/a.pdf']);
+  assert.deepEqual(taken, ['expenses/k/a.pdf']);
+  const it = getItem(id)!;
+  assert.equal(it.state, 'dismissed');
+  assert.equal(it.storagePath, null);
+  assert.equal(it.accountingRef, null);
+  assert.equal(getVendor(key)?.status, 'ignored');
+});
+
+test('remove: what Morning cannot take back is reported and kept on the document', async () => {
+  const d = deps();
+  d.storage = { ...d.storage, remove: async () => 'not_found' as const };
+  d.accounting = {
+    send: async () => ({ ref: 'x', mode: 'api_file' as const }),
+    remove: async () => ({ outcome: 'manual' as const, reason: 'delete_not_supported' }),
+  };
+  const { call } = await boot({ getDeps: () => ({ deps: d, gmail }) });
+  const id = item('needs_attention', { category: 'תוכנה' });
+  updateItem(id, { storagePath: '/Inv/a.pdf', accountingRef: 'expenses/k/a.pdf', accountingMode: 'api_file' });
+  transition(id, 'done');
+  const body = await (await call('POST', `/api/items/${id}/remove`, {})).json() as any;
+  assert.equal(body.storage, 'not_found');
+  assert.equal(body.morning, 'manual');
+  assert.equal(body.morningReason, 'delete_not_supported');
+  assert.equal(getItem(id)!.accountingRef, 'expenses/k/a.pdf');
+  assert.equal(getItem(id)!.state, 'dismissed');
+});
+
+test('items carry the email they came from, with a Gmail link; notifications list and mark read', async () => {
+  const { call } = await boot();
+  createEmail({ messageId: '19c854555917d073', threadId: 't', sender: 'sender@invoice-one.com', subject: 'אקו"ם - חשבונית', receivedAt: '2026-02-22T00:00:00Z', mode: 'ongoing' });
+  const { id } = createItem('19c854555917d073', null, Buffer.from('%PDF-1.4 e'));
+  const list = await (await call('GET', '/api/items')).json() as any;
+  const row = list.items.find((i: any) => i.id === id);
+  assert.equal(row.email.sender, 'sender@invoice-one.com');
+  assert.equal(row.email.gmailUrl, 'https://mail.google.com/mail/u/0/#all/19c854555917d073');
+  assert.equal(((await (await call('GET', `/api/items/${id}`)).json()) as any).email.subject, 'אקו"ם - חשבונית');
+
+  getDb().prepare(`INSERT INTO notifications (at, kind, item_id, data_json) VALUES (?, 'processed', ?, ?)`)
+    .run('2026-06-15T09:00:00Z', id, JSON.stringify({ vendor: 'אקו"ם', sent: true }));
+  const n = await (await call('GET', '/api/notifications')).json() as any;
+  assert.equal(n.unread, 1);
+  assert.equal(n.notifications[0].data.vendor, 'אקו"ם');
+  assert.equal(((await (await call('GET', '/api/summary')).json()) as any).notificationsUnread, 1);
+  assert.equal(((await (await call('POST', '/api/notifications/read', {})).json()) as any).unread, 0);
+});
+
+test('push: key, subscribe (push services only), unsubscribe; the VAPID key cannot be written from outside', async () => {
+  const { call } = await boot();
+  const { publicKey } = await (await call('GET', '/api/push/key')).json() as { publicKey: string };
+  assert.equal(Buffer.from(publicKey, 'base64url').length, 65);
+  const keys = { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) };
+  assert.equal((await call('POST', '/api/push/subscribe', { endpoint: 'https://evil.example/x', keys })).status, 400);
+  assert.equal((await call('POST', '/api/push/subscribe', { endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys, expirationTime: null })).status, 200);
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM push_subscriptions').pluck().get(), 1);
+  assert.equal((await call('POST', '/api/push/unsubscribe', { endpoint: 'https://fcm.googleapis.com/fcm/send/x' })).status, 200);
+  assert.equal(getDb().prepare('SELECT COUNT(*) FROM push_subscriptions').pluck().get(), 0);
+  assert.equal((await call('PUT', '/api/secrets/push_vapid', { value: 'x' })).status, 404);
+});

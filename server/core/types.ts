@@ -52,6 +52,11 @@ export interface StorageDestination {
   listFolders?(path: string): Promise<FolderEntry[]>;
   /** Creates `name` inside `parent` ('' = the top); an existing folder of that name is returned as it is. */
   createFolder?(parent: string, name: string): Promise<FolderEntry>;
+  /**
+   * Deletes a filed document (the path `put` returned) the recoverable way: Dropbox keeps deleted files for a while,
+   * Drive moves it to the trash. 'not_found' when nothing is there any more.
+   */
+  remove?(path: string): Promise<'removed' | 'not_found'>;
 }
 export interface FolderEntry { name: string; path: string }
 /** createFolder: a file (not a folder) already has that name. */
@@ -68,6 +73,12 @@ export interface AccountingDestination {
   /** `retry`: this item already had a send attempt (it may have reached the destination), so check for it first. */
   send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category; retry?: boolean }):
     Promise<{ ref: string; mode: 'api_fields' | 'api_file' | 'email' }>;
+  /**
+   * Takes back a document sent earlier (`ref`/`mode` as send returned them). 'removed': it is gone; 'manual': this
+   * destination cannot take it back by itself, so the owner must (the reason says why).
+   */
+  remove?(sent: { ref: string; mode: string | null; fields: ExtractedFields | null }):
+    Promise<{ outcome: 'removed' | 'manual'; reason?: string }>;
 }
 
 export interface Deps {

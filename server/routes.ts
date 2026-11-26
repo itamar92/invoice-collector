@@ -13,6 +13,8 @@ import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, ITEM_SORTS, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideMissed, queueMissed } from './core/missed.js';
+import { listNotifications, markNotificationsRead, unreadNotifications } from './core/notifications.js';
+import { deletePushSubscription, isAllowedEndpoint, savePushSubscription, sendPush, vapidPublicKey } from './push.js';
 import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
 import { suggestFilter } from './core/labelSuggest.js';
@@ -167,6 +169,7 @@ const SettingsPatch = z.object({
   telegramRelayUrl: z.string().trim().max(300).regex(/^(https?:\/\/[^\s]+)?$/),
   shareRecipes: z.boolean(),
   ownTaxIds: z.array(z.string().trim().regex(/^\d{8,9}$/)).max(5),
+  autoApproveVendors: z.boolean(),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -180,6 +183,17 @@ function eventsOf(itemId: string) {
     'SELECT at, from_state, to_state, note FROM item_events WHERE item_id = ? ORDER BY id').all(itemId) as
     { at: string; from_state: string | null; to_state: string; note: string | null }[];
   return rows.map((e) => ({ at: e.at, from: e.from_state, to: e.to_state, note: sanitizeError(e.note) }));
+}
+
+/** The email a document came from (null for an uploaded one), with a link that opens it in Gmail. */
+function emailOf(messageId: string) {
+  if (isUploadId(messageId)) return null;
+  const e = getEmail(messageId);
+  if (!e) return null;
+  return {
+    sender: e.sender, subject: e.subject, receivedAt: e.receivedAt,
+    gmailUrl: /^[0-9a-f]{6,32}$/i.test(messageId) ? `https://mail.google.com/mail/u/0/#all/${messageId}` : null,
+  };
 }
 
 /** 'Name <A@B.co>' → 'a@b.co'. */
@@ -237,7 +251,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const items = (worthIds
       ? listItems({ ...filter, limit: 100_000 }).filter((i) => worthIds.has(i.id)).slice(q.offset, q.offset + q.limit)
       : listItems({ ...filter, limit: q.limit, offset: q.offset }))
-      .map(({ text, ...rest }) => ({ ...rest, hasText: !!text?.trim() }));
+      .map(({ text, ...rest }) => ({ ...rest, hasText: !!text?.trim(), email: emailOf(rest.messageId) }));
     res.json({ items, limit: q.limit, offset: q.offset });
   }));
 
@@ -247,7 +261,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const { text, ...rest } = item;
     res.json({
       ...rest, hasText: !!text?.trim(), events: eventsOf(item.id), emailMode: getEmail(item.messageId)?.mode ?? null,
-      aiUsage: itemUsage(item.id),
+      aiUsage: itemUsage(item.id), email: emailOf(item.messageId),
     });
   }));
 
@@ -381,6 +395,49 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json(getItem(item.id));
   }));
 
+  // A document that should not have been collected: its file is deleted from the cloud (recoverable there), its
+  // Morning draft is taken back when Morning allows it, and the document is dismissed. `ignoreVendor` also stops
+  // collecting this supplier's documents. Whatever could not be taken back is reported, never hidden.
+  r.post('/items/:id/remove', wrap(async (req, res) => {
+    const body = parse(z.object({ ignoreVendor: z.boolean().optional() }).strict(), req.body ?? {});
+    const item = getItem(param(req, 'id'));
+    if (!item) throw notFound('item');
+    let deps: Deps | null = null;
+    try { deps = ctx.getDeps().deps; } catch { /* not connected: nothing in the cloud can be removed now */ }
+    let storage: 'removed' | 'not_found' | 'none' | 'failed' = 'none';
+    let storageError: string | undefined;
+    if (item.storagePath) {
+      if (!deps?.storage.remove) { storage = 'failed'; storageError = 'storage_not_connected'; } else {
+        try { storage = await deps.storage.remove(item.storagePath); } catch (e) {
+          storage = 'failed'; storageError = sanitizeError((e as Error).message) ?? undefined;
+        }
+      }
+    }
+    let morning: 'removed' | 'manual' | 'none' = 'none';
+    let morningReason: string | undefined;
+    if (item.accountingRef) {
+      if (!deps?.accounting?.remove) { morning = 'manual'; morningReason = 'accounting_not_connected'; } else {
+        const r = await deps.accounting.remove({ ref: item.accountingRef, mode: item.accountingMode, fields: item.fields });
+        morning = r.outcome; morningReason = r.reason ? sanitizeError(r.reason) ?? undefined : undefined;
+      }
+    }
+    getDb().transaction(() => {
+      // What is gone from a destination is forgotten, so a later restore files / sends it again.
+      updateItem(item.id, {
+        attempts: 0, nextAttemptAt: null,
+        ...(storage === 'removed' || storage === 'not_found' ? { storagePath: null } : {}),
+        ...(morning === 'removed' ? { accountingRef: null, accountingMode: null } : {}),
+      });
+      const note = `manual_remove: storage=${storage}${storageError ? ` (${storageError})` : ''}; morning=${morning}${morningReason ? ` (${morningReason})` : ''}`;
+      if (item.state === 'dismissed') {
+        getDb().prepare('INSERT INTO item_events (item_id, at, from_state, to_state, note) VALUES (?, ?, ?, ?, ?)')
+          .run(item.id, clock().toISOString(), 'dismissed', 'dismissed', note);
+      } else transition(item.id, 'dismissed', undefined, note);
+      if (body.ignoreVendor && item.vendorKey && getVendor(item.vendorKey)) setVendorStatus(item.vendorKey, 'ignored');
+    })();
+    res.json({ item: getItem(item.id), storage, storageError, morning, morningReason });
+  }));
+
   // The way back: a dismissed or ignored document re-enters the flow where it belongs. A filed one returns to
   // filed (accounting decides again), an unread one is read again, an approved-vendor one is filed.
   r.post('/items/:id/restore', wrap((req, res) => {
@@ -408,6 +465,37 @@ export function apiRouter(ctx: ApiContext): express.Router {
       throw e;
     }
     res.json(getItem(item.id));
+  }));
+
+  // ---------- notifications ----------
+  r.get('/notifications', wrap((_req, res) => {
+    res.json({ notifications: listNotifications(50), unread: unreadNotifications() });
+  }));
+  r.post('/notifications/read', wrap((req, res) => {
+    const { ids } = parse(z.object({ ids: z.array(z.number().int()).max(500).optional() }).strict(), req.body ?? {});
+    res.json({ changed: markNotificationsRead(ids), unread: unreadNotifications() });
+  }));
+
+  // Web Push: the device (browser or home-screen app) subscribes with this instance's public key.
+  r.get('/push/key', wrap((_req, res) => { res.json({ publicKey: vapidPublicKey() }); }));
+  const PushSub = z.object({
+    endpoint: z.string().url().max(1000),
+    keys: z.object({ p256dh: z.string().min(20).max(200), auth: z.string().min(8).max(100) }).passthrough(),
+  }).passthrough();
+  r.post('/push/subscribe', wrap((req, res) => {
+    const sub = parse(PushSub, req.body);
+    if (!isAllowedEndpoint(sub.endpoint)) throw new HttpError(400, 'push_endpoint_not_allowed');
+    savePushSubscription({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } },
+      req.get('user-agent') ?? null, clock());
+    res.json({ ok: true });
+  }));
+  r.post('/push/unsubscribe', wrap((req, res) => {
+    const { endpoint } = parse(z.object({ endpoint: z.string().max(1000) }).strict(), req.body);
+    deletePushSubscription(endpoint);
+    res.json({ ok: true });
+  }));
+  r.post('/push/test', wrap(async (_req, res) => {
+    res.json(await sendPush({ title: 'אוסף החשבוניות', body: 'התראות פועלות במכשיר הזה ✓', url: '/attention', tag: 'test' }));
   }));
 
   // ---------- vendors ----------
@@ -692,7 +780,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
 
   r.put('/secrets/:key', wrap((req, res) => {
     const key = param(req, 'key');
-    if (!(SECRET_KEYS as string[]).includes(key)) throw notFound('secret');
+    if (!(SECRET_KEYS as string[]).includes(key) || key === 'push_vapid') throw notFound('secret'); // push key: made by the server
     if (key === 'ssh_private_key' && !currentUser(res)?.isAdmin) throw new HttpError(403, 'ssh_owner_only');
     const { value } = parse(z.object({ value: z.string().min(1).max(20_000) }).strict(), req.body);
     setSecret(key as SecretKey, value);

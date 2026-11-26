@@ -95,6 +95,14 @@ class Client {
   /** Authenticated GET (no body) on the API base; same error mapping as post. */
   get(path: string): Promise<any> { return this.call('GET', this.base + path); }
 
+  /** Authenticated DELETE on the API base; the raw status and body, so the caller can tell "not supported". */
+  async del(path: string): Promise<Resp> {
+    const token = await this.auth();
+    const r = await this.raw('DELETE', this.base + path, { Authorization: `Bearer ${token}` });
+    if (r.status === 401) this.token = null;
+    return r;
+  }
+
   /** Authenticated GET on the v2 file-upload host. */
   getUpload(path: string): Promise<any> { return this.call('GET', this.uploadHost + path); }
 
@@ -214,6 +222,49 @@ export class MorningAccounting implements AccountingDestination {
     await this.client.uploadPresigned(p as Presign, item.pdf, name);
     const key = typeof p.fields.key === 'string' ? p.fields.key.replace('${filename}', name) : '';
     return { ref: key || `upload:${this.now().toISOString()}`, mode: 'api_file' as const };
+  }
+
+  /**
+   * Takes back a draft we uploaded. Never touches an approved expense (that is the owner's bookkeeping: they delete it
+   * in Morning). The draft is found by the uploaded file's key (our ref), else as provably the same document, and
+   * deleted with DELETE /expenses/drafts/{id}. That endpoint is not documented (docs/morning-api.md): when Morning
+   * refuses it, the outcome is 'manual' and the owner deletes the draft in Morning.
+   */
+  async remove(sent: { ref: string; mode: string | null; fields: ExtractedFields | null }):
+    Promise<{ outcome: 'removed' | 'manual'; reason?: string }> {
+    if (sent.mode === 'email') return { outcome: 'manual', reason: 'sent_by_email' };
+    if (sent.ref.startsWith('expense:')) return { outcome: 'manual', reason: 'approved_expense' };
+    let id = sent.ref.startsWith('draft:') ? sent.ref.slice('draft:'.length) : null;
+    try {
+      if (!id) id = await this.findDraftFor(sent.ref, sent.fields);
+      if (!id) return { outcome: 'manual', reason: 'draft_not_found' };
+      const r = await this.client.del(`/expenses/drafts/${encodeURIComponent(id)}`);
+      if (r.status >= 200 && r.status < 300) return { outcome: 'removed' };
+      if (r.status === 404 || r.status === 405) return { outcome: 'manual', reason: 'delete_not_supported' };
+      return { outcome: 'manual', reason: String(r.body?.errorMessage ?? `Morning ${r.status}`).slice(0, 200) };
+    } catch (e) {
+      return { outcome: 'manual', reason: (e as Error).message.slice(0, 200) };
+    }
+  }
+
+  /** The draft holding the file uploaded under `key`, else one provably the same document. */
+  private async findDraftFor(key: string, f: ExtractedFields | null): Promise<string | null> {
+    const from = new Date(this.now().getTime() - 400 * 86_400_000);
+    const name = key.slice(key.lastIndexOf('/') + 1);
+    let same: string | null = null;
+    for (let page = 1; page <= 20; page++) {
+      const out = await this.client.post('/expenses/drafts/search', { fromDate: ymd(from), page, pageSize: 100 });
+      const items: any[] = Array.isArray(out?.items) ? out.items : [];
+      for (const d of items) {
+        const fileKey = typeof d?.expense?.fileKey === 'string' ? d.expense.fileKey : '';
+        if (d?.id && fileKey && (fileKey === key || key.endsWith(fileKey) || fileKey.endsWith(key) || (name && fileKey.endsWith(name)))) {
+          return String(d.id);
+        }
+        if (!same && d?.id && f && isSameDocument(d?.expense, f)) same = String(d.id);
+      }
+      if (items.length < 100 || (typeof out?.pages === 'number' && page >= out.pages)) break;
+    }
+    return same;
   }
 
   /** A recent draft that is provably this document: same number, same amount and same supplier. */

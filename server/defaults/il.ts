@@ -67,4 +67,5 @@ export const IL_DEFAULTS: Settings = {
   telegramRelayUrl: '',
   shareRecipes: true,
   ownTaxIds: [],
+  autoApproveVendors: true,
 };

@@ -86,6 +86,12 @@ The code therefore never inspects it and never calls anything that confirms a dr
 
 Never called: any endpoint with `approve` or `report` in its path; no draft-confirm endpoint was found, none is used.
 
+Removing a document the owner should not have collected (`POST /api/items/:id/remove`): the draft is found through
+`POST /expenses/drafts/search` (by `expense.fileKey` = our stored ref, else number + amount + supplier), then
+`DELETE /expenses/drafts/{id}` is tried. That endpoint is NOT documented: a 404/405 (or any refusal) is reported to the
+owner as "delete it in Morning yourself", never retried. An approved expense (`expense:<id>` ref) and an email-mode
+send are never touched.
+
 ## Consequences for the three modes
 - **api_file**: implemented on `POST /expenses/file`. Morning reads the PDF itself.
 - **api_fields**: NOT confirmed. No documented way to attach our extracted fields to a draft without confirming it

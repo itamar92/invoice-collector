@@ -9,6 +9,7 @@ import {
 } from './items.js';
 import { buildFilename, buildFolder } from './naming.js';
 import { isOwnDocument, isZeroTotal, notInvoiceKind } from './notInvoice.js';
+import { notifyProcessed } from './notifications.js';
 import { PdfError, extractPdfText } from './pdfText.js';
 import { matchesRecipe, runRecipe, type Recipe } from './recipe.js';
 import { adoptSharedRecipe, findRecipe, getActiveRecipe, getVendor, saveRecipe, setVendorStatus, upsertVendor, type VendorStatus } from './recipeStore.js';
@@ -323,8 +324,36 @@ async function analyze(item: Item, deps: Deps): Promise<void> {
   }
 
   if (!category) return moveTo(item.id, 'needs_attention', 'unknown_category', fields.category ?? undefined);
-  if (!vendor || vendor.status === 'unreviewed') return moveTo(item.id, 'awaiting_vendor', 'new_vendor');
+  if (!vendor) return moveTo(item.id, 'awaiting_vendor', 'new_vendor');
+  if (vendor.status === 'unreviewed') {
+    if (!canAutoApprove(item.messageId, settings)) return moveTo(item.id, 'awaiting_vendor', 'new_vendor');
+    setVendorStatus(vendor.key, 'business');
+    noteItem(item.id, 'vendor_auto_approved');
+  }
   afterVendorStep(item.id);
+}
+
+/** An ongoing document's new supplier is approved without asking (setting on); first-import ones always ask. */
+function canAutoApprove(messageId: string, settings: Settings): boolean {
+  return settings.autoApproveVendors !== false && getEmail(messageId)?.mode !== 'backfill';
+}
+
+/**
+ * Setting on: suppliers still waiting for a decision that have an ongoing document waiting are approved as
+ * business, and their waiting documents move on. Returns the approved vendor keys.
+ */
+export async function autoApproveWaitingVendors(deps: Deps): Promise<string[]> {
+  if (deps.settings.autoApproveVendors === false) return [];
+  const keys = getDb().prepare(
+    `SELECT DISTINCT v.key FROM items i JOIN vendors v ON v.key = i.vendor_key JOIN emails e ON e.message_id = i.message_id
+     WHERE i.state = 'awaiting_vendor' AND v.status = 'unreviewed' AND e.mode != 'backfill'`).pluck().all() as string[];
+  for (const key of keys) {
+    for (const id of getDb().prepare(`SELECT id FROM items WHERE state = 'awaiting_vendor' AND vendor_key = ?`).pluck().all(key) as string[]) {
+      noteItem(id, 'vendor_auto_approved');
+    }
+    await setVendorDecision(key, 'business', deps);
+  }
+  return keys;
 }
 
 /** ready → stored. Never uploads twice: a recorded path is reused, and same-content files are not re-sent. */
@@ -414,10 +443,13 @@ async function account(item: Item, deps: Deps): Promise<void> {
     // AccountingRejected (the destination's reason is the message) and anything unexpected: no retry.
     return moveTo(item.id, 'needs_attention', 'accounting_error', message(e));
   }
-  getDb().transaction(() => {
+  const moved = getDb().transaction(() => {
     updateItem(item.id, { accountingRef: res.ref, accountingMode: res.mode });
-    if (moveIf(item.id, 'stored', 'done', `sent:${res.mode}`) && item.recipeFailed) noteItem(item.id, 'recipe_rewritten');
+    const ok = moveIf(item.id, 'stored', 'done', `sent:${res.mode}`);
+    if (ok && item.recipeFailed) noteItem(item.id, 'recipe_rewritten');
+    return ok;
   })();
+  if (moved) notifyProcessed(item.id, true, deps.now());
 }
 
 // ---------- helpers ----------
@@ -502,11 +534,15 @@ function moveIf(id: string, from: ItemState, to: ItemState, note?: string): bool
   })();
 }
 
+/** Done-notes that are not a newly processed document worth announcing. */
+const QUIET_DONE = new Set(['backfill_no_accounting', 'receipt_for_sent_invoice']);
+
 function finishDone(item: Item, note: string): void {
   getDb().transaction(() => {
     moveTo(item.id, 'done', undefined, note);
     if (item.recipeFailed) noteItem(item.id, 'recipe_rewritten');
   })();
+  if (!QUIET_DONE.has(note)) notifyProcessed(item.id, note === 'accounting_ref_recorded');
 }
 
 /** After step 5 (vendor approved): already-filed items go on to accounting; backfill items wait for approval;

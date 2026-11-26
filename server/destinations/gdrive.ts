@@ -122,6 +122,24 @@ export class GoogleDriveStorage implements StorageDestination {
     return { name: made.name || name, path };
   }
 
+  /** Moves the filed document to the Drive trash (restorable from there for 30 days). */
+  async remove(path: string): Promise<'removed' | 'not_found'> {
+    const segs = driveSegments(path);
+    const name = segs.pop();
+    if (!name) return 'not_found';
+    const parent = await this.folderId(segs, false);
+    const f = parent ? await this.findChild(parent, name, false) : null;
+    if (!f) return 'not_found';
+    const r = await this.call((tok) => this.f(`${API}/files/${encodeURIComponent(f.id)}?fields=id`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trashed: true }),
+    }));
+    if (r.status === 404) return 'not_found';
+    this.assertOk(r);
+    return 'removed';
+  }
+
   /** The id of the folder at `segs`; missing levels are made when `create`, else null. */
   private async folderId(segs: string[], create: boolean): Promise<string | null> {
     // Folders can be moved or trashed in Drive at any time: forget what was resolved every few minutes.

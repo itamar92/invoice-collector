@@ -33,14 +33,15 @@ const msg = (id: string, over: Partial<GmailMessage> = {}): GmailMessage => ({
 });
 function fakeGmail(messages: Record<string, GmailMessage>) {
   const marked: string[] = [];
+  const read: string[] = [];
   const g: GmailSource = {
     listCandidateMessages: async () => Object.keys(messages),
     searchMessages: async () => [],
     fetchHeaders: async (id) => ({ id, sender: messages[id].sender, subject: messages[id].subject, receivedAt: messages[id].receivedAt }),
     fetchMessage: async (id) => messages[id],
-    markHandled: async (id) => { marked.push(id); },
+    markHandled: async (id, opts) => { marked.push(id); if (opts?.read) read.push(id); },
   };
-  return { g, marked };
+  return { g, marked, read };
 }
 const pdfResponse = (body: Buffer) => new Response(body, { status: 200 });
 const publicResolve = async () => [{ address: '93.184.216.34', family: 4 }];
@@ -283,11 +284,37 @@ test('markHandled creates the label once and only adds it', async () => {
   });
   const gc = new GmailClient({ fetchImpl: f.impl });
   await gc.markHandled('m1');
-  await gc.markHandled('m2');
+  await gc.markHandled('m2', { read: true });
   assert.equal(f.calls.filter((c) => c.url.endsWith('/labels')).length, 2); // list + create, once
   const mods = f.calls.filter((c) => c.url.endsWith('/modify'));
   assert.equal(mods.length, 2);
   assert.deepEqual(JSON.parse(String(mods[0].init.body)), { addLabelIds: ['LNEW'] });
+  assert.deepEqual(JSON.parse(String(mods[1].init.body)), { addLabelIds: ['LNEW'], removeLabelIds: ['UNREAD'] });
+});
+
+test('a message whose invoice was collected is marked read; one where nothing was collected stays unread', async () => {
+  const { g, read } = fakeGmail({
+    m1: msg('m1', { pdfs: [{ name: 'a.pdf', data: pdf('1') }] }),
+    m2: msg('m2', { pdfs: [{ name: 'b.pdf', data: pdf('2') }] }),
+  });
+  await ingestMessage(g, 'm1', 'ongoing');
+  await ingestMessage(g, 'm2', 'ongoing');
+  transition(listItems({ messageId: 'm1' })[0].id, 'done');
+  transition(listItems({ messageId: 'm2' })[0].id, 'ignored');
+  assert.equal(await markHandledIfComplete(g, 'm1'), true);
+  assert.equal(await markHandledIfComplete(g, 'm2'), true);
+  assert.deepEqual(read, ['m1']);
+});
+
+test('a link that did not lead to a PDF keeps the host and the error on the placeholder\'s history', async () => {
+  const { g } = fakeGmail({ m1: msg('m1', { html: '<a href="https://docs.vendor.test/invoice/123">חשבונית</a>' }) });
+  await ingestMessage(g, 'm1', 'ongoing', {
+    resolve: publicResolve, fetchImpl: (async () => new Response('<html>login</html>', { status: 200 })) as typeof fetch,
+  });
+  const [it] = listItems({ messageId: 'm1' });
+  assert.equal(it.reason, 'link_not_pdf');
+  const note = getDb().prepare('SELECT note FROM item_events WHERE item_id = ?').pluck().get(it.id) as string;
+  assert.match(note, /^link_not_pdf: docs\.vendor\.test - /);
 });
 
 test('unmarkHandled removes the done label in one batchModify; no label, no call', async () => {

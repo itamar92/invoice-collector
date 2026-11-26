@@ -196,6 +196,34 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX recipes_vendor ON recipes (vendor_key, version);
     `,
   },
+  {
+    // In-app notifications (server/core/notifications.ts): one row per processed document.
+    version: 10,
+    sql: `
+      CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        item_id TEXT,
+        data_json TEXT NOT NULL,
+        read INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX notifications_read ON notifications (read);
+    `,
+  },
+  {
+    // Browsers / home-screen apps that receive the notifications as Web Push (server/push.ts).
+    version: 11,
+    sql: `
+      CREATE TABLE push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: Db, migrations = MIGRATIONS): void {

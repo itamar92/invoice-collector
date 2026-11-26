@@ -300,3 +300,25 @@ test('classifications: Morning rejection surfaces as AccountingRejected', async 
   const f = fakeFetch((c) => path(c).endsWith('/classifications/map') ? json(403, { errorMessage: 'no access' }) : happy(c));
   await assert.rejects(fetchMorningClassifications({ fetchImpl: f.impl }), (e) => e instanceof AccountingRejected && /no access/.test(e.message));
 });
+
+test('remove: finds the draft by its uploaded file key and deletes it; never an approved expense; refusal → manual', async () => {
+  const withDelete = (status: number) => (c: Call) => {
+    if (c.init.method === 'DELETE') return status === 200 ? json(200, {}) : json(status, { errorMessage: 'no' });
+    return drafts(draft('other', { fileKey: '2026/01/10/biz-1/b.pdf' }), draft('d-1', { fileKey: REF }))(c);
+  };
+  const f = fakeFetch(withDelete(200));
+  const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m.remove({ ref: REF, mode: 'api_file', fields }), { outcome: 'removed' });
+  const del = f.calls.find((c) => c.init.method === 'DELETE')!;
+  assert.equal(path(del), '/api/v1/expenses/drafts/d-1');
+
+  const refused = fakeFetch(withDelete(404));
+  const m2 = new MorningAccounting({ fetchImpl: refused.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m2.remove({ ref: REF, mode: 'api_file', fields }), { outcome: 'manual', reason: 'delete_not_supported' });
+
+  const none = fakeFetch(happy);
+  const m3 = new MorningAccounting({ fetchImpl: none.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.deepEqual(await m3.remove({ ref: 'expense:77', mode: 'api_file', fields }), { outcome: 'manual', reason: 'approved_expense' });
+  assert.deepEqual(await m3.remove({ ref: 'msg-1', mode: 'email', fields }), { outcome: 'manual', reason: 'sent_by_email' });
+  assert.equal(none.calls.length, 0);
+});

@@ -104,6 +104,11 @@ function App() {
   );
 }
 
+// The service worker only shows push notifications (public/sw.js); it caches nothing.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* no push on this browser */ }); });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter><App /></BrowserRouter>

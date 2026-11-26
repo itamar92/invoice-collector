@@ -5,6 +5,7 @@ import type { SettingsResponse } from './api.js';
 import { AiThinking, Button, CountBadge, ErrorText, fmtDateTime, Icon, LoadingBar, Notice, takeFlash, useAction, useApp } from './components/ui.js';
 import { useUploadReceipt } from './components/UploadReceipt.js';
 import { InstallBanner, useInstallApp } from './components/InstallApp.js';
+import { NotificationBell } from './components/Notifications.js';
 import type { IconName } from './components/ui.js';
 import { t } from './i18n/he.js';
 import type { MessageKey } from './i18n/he.js';
@@ -134,6 +135,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             <Brand />
           </Link>
           <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell align="end" />
             <Button variant="secondary" className="bg-white px-3 shadow-soft" loading={run.busy} onClick={runNow}>
               {run.busy ? t('worker.running') : t('worker.runNow')}
             </Button>
@@ -148,7 +150,10 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
 
       {/* desktop: rail on the start (right) side */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-e border-line p-4 md:flex">
-        <Link to="/attention" className="px-2 pb-5 pt-2"><Brand /></Link>
+        <div className="flex items-center justify-between gap-2 px-2 pb-5 pt-2">
+          <Link to="/attention" className="min-w-0"><Brand /></Link>
+          <NotificationBell align="start" />
+        </div>
         <nav className="flex flex-col gap-1">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to}

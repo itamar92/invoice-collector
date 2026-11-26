@@ -11,6 +11,25 @@ export interface Summary {
   /** Not filed yet: needs a fix / first-import approval (any time) / still being read or filed. */
   needsAttention: number; backfillWaiting: number; inProgress: number;
   ingestFailures: number; lastTickAt: string | null; lastTickError: string | null; lastAiSuccessAt: string | null;
+  notificationsUnread: number;
+}
+
+/** The email a document came from; null for an uploaded one. */
+export interface ItemEmail { sender: string | null; subject: string | null; receivedAt: string | null; gmailUrl: string | null }
+
+/** "A document finished processing" (the UI writes the text). */
+export interface AppNotification {
+  id: number; at: string; kind: 'processed'; itemId: string | null; read: boolean;
+  data: {
+    vendor: string | null; docType: string | null; docNumber: string | null; total: number | null;
+    currency: string | null; sent: boolean; storagePath: string | null;
+  };
+}
+
+/** POST /items/:id/remove: what happened in each destination. */
+export interface RemoveResult {
+  item: Item; storage: 'removed' | 'not_found' | 'none' | 'failed'; storageError?: string;
+  morning: 'removed' | 'manual' | 'none'; morningReason?: string;
 }
 
 export interface Item {
@@ -20,6 +39,7 @@ export interface Item {
   accountingMode: string | null; attempts: number; createdAt: string; updatedAt: string;
   /** Lists only: the document's text was extracted (a recipe can be written from it). */
   hasText?: boolean;
+  email?: ItemEmail | null;
 }
 /** Calls and tokens over some AI calls; `unknownCalls` reported no token counts (SSH agent). */
 export interface AiUsageTotals { calls: number; inputTokens: number; outputTokens: number; unknownCalls: number }
@@ -36,6 +56,7 @@ export interface ItemEvent { at: string; from: string | null; to: string; note: 
 /** emailMode 'backfill': the item can be filed but is never sent to Morning, so the UI offers no "send". */
 export type ItemDetail = Item & {
   events: ItemEvent[]; emailMode: 'ongoing' | 'backfill' | 'manual' | null; hasText: boolean; aiUsage: AiUsageTotals;
+  email: ItemEmail | null;
 };
 
 export type VendorStatus = 'business' | 'personal' | 'ignored' | 'unreviewed';
@@ -195,6 +216,14 @@ export const api = {
     send<{ item: Item; valid: boolean; problems: Reason[] }>('PUT', `/api/items/${enc(id)}/fields`, patch),
   retry: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/retry`),
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
+  /** Deletes the filed copy from the cloud, takes back the Morning draft when possible, and dismisses. */
+  remove: (id: string, ignoreVendor = false) => send<RemoveResult>('POST', `/api/items/${enc(id)}/remove`, { ignoreVendor }),
+  notifications: (quiet = false) => get<{ notifications: AppNotification[]; unread: number }>('/api/notifications', quiet),
+  pushKey: () => get<{ publicKey: string }>('/api/push/key'),
+  pushSubscribe: (sub: PushSubscriptionJSON) => send<{ ok: true }>('POST', '/api/push/subscribe', sub),
+  pushUnsubscribe: (endpoint: string) => send<{ ok: true }>('POST', '/api/push/unsubscribe', { endpoint }),
+  pushTest: () => send<{ sent: number; failed: number }>('POST', '/api/push/test'),
+  readNotifications: (ids?: number[]) => send<{ changed: number; unread: number }>('POST', '/api/notifications/read', ids ? { ids } : {}),
   catchup: () => get<{ rows: CatchupRow[]; mode: string | null; canCheck: boolean }>('/api/morning/catchup'),
   catchupCheck: (ids: string[]) => send<{ results: CatchupCheck[] }>('POST', '/api/morning/catchup/check', { ids }),
   catchupSend: (ids: string[]) => send<{ results: CatchupSent[] }>('POST', '/api/morning/catchup/send', { ids }),
