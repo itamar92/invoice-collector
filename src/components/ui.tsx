@@ -324,8 +324,8 @@ export const hintCls = 'text-xs text-muted';
 /**
  * A write-only secret: shows configured or not only, never a value. Saving sends the typed value and clears the box.
  */
-export function SecretInput({ label, configured, onSave, multiline }: {
-  label: string; configured: boolean; onSave: (v: string) => Promise<void>; multiline?: boolean;
+export function SecretInput({ label, configured, onSave, multiline, placeholder }: {
+  label: string; configured: boolean; onSave: (v: string) => Promise<void>; multiline?: boolean; placeholder?: string;
 }) {
   const [v, setV] = useState('');
   const a = useAction();
@@ -338,7 +338,7 @@ export function SecretInput({ label, configured, onSave, multiline }: {
       </div>
       <div className="flex gap-2">
         {multiline
-          ? <textarea aria-label={label} className={`${inputCls} ltr h-20 font-mono text-xs`} value={v} onChange={(e) => setV(e.target.value)} autoComplete="off" spellCheck={false} />
+          ? <textarea aria-label={label} className={`${inputCls} ltr h-20 font-mono text-xs`} value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} />
           : <input aria-label={label} type="password" className={`${inputCls} ltr`} value={v} onChange={(e) => setV(e.target.value)} autoComplete="new-password" />}
         <Button variant="secondary" disabled={!v.trim()} onClick={save}>{a.busy ? t('common.saving') : t('common.save')}</Button>
       </div>

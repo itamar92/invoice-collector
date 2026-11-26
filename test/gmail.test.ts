@@ -123,6 +123,18 @@ test('link returning HTML makes a link_not_pdf placeholder', async () => {
   assert.equal(it.hasPdf, false);
 });
 
+test('a linked invoice wins over a banner image in the same email', async () => {
+  const { g } = fakeGmail({ m1: msg('m1', { html: '<a href="https://files.example.test/invoice/1">לצפייה בחשבונית</a>', images: [{ name: 'banner.jpg', data: JPEG }] }) });
+  await ingestMessage(g, 'm1', 'ongoing', { resolve: publicResolve, fetchImpl: (async () => pdfResponse(pdf('linked'))) as typeof fetch });
+  assert.deepEqual(listItems({ messageId: 'm1' }).map((i) => i.attachmentName), ['link.pdf']);
+});
+
+test('an image is still used when the email has no working link', async () => {
+  const { g } = fakeGmail({ m1: msg('m1', { images: [{ name: 'Receipt.jpg', data: JPEG }] }) });
+  await ingestMessage(g, 'm1', 'ongoing');
+  assert.deepEqual(listItems({ messageId: 'm1' }).map((i) => i.attachmentName), ['Receipt.pdf']);
+});
+
 test('no PDF and no links makes a no_document placeholder', async () => {
   const { g } = fakeGmail({ m1: msg('m1', { text: 'hello' }) });
   await ingestMessage(g, 'm1', 'ongoing');

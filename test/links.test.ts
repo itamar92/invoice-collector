@@ -59,7 +59,7 @@ test('downloadPdf rejects html, non-2xx, and oversize bodies', async () => {
   await assert.rejects(() => downloadPdf('https://a.example/x', { resolve: pub, fetchImpl: big }), code('link_too_large'));
 });
 
-test('downloadPdf follows redirects, re-checks them, and caps at 3', async () => {
+test('downloadPdf follows redirects, re-checks them, and caps at 6', async () => {
   const hops: string[] = [];
   const redirectTo = (loc: string) => resp(null, { status: 302, headers: { location: loc } });
   const blocked = (async (u: string) => { hops.push(u); return u.endsWith('/a') ? redirectTo('http://127.0.0.1/secret') : resp('%PDF-'); }) as unknown as typeof fetch;
@@ -69,7 +69,7 @@ test('downloadPdf follows redirects, re-checks them, and caps at 3', async () =>
   let n = 0;
   const loop = (async () => redirectTo(`/r${n++}`)) as unknown as typeof fetch;
   await assert.rejects(() => downloadPdf('https://a.example/a', { resolve: pub, fetchImpl: loop }), code('link_failed'));
-  assert.equal(n, 4);
+  assert.equal(n, 7);
 
   const ok = (async (u: string) => u.endsWith('/a') ? redirectTo('/b') : resp('%PDF-ok')) as unknown as typeof fetch;
   assert.equal((await downloadPdf('https://a.example/a', { resolve: pub, fetchImpl: ok })).length, 7);
@@ -118,4 +118,45 @@ test('a lookalike host is not treated as invoice-one', async () => {
   const fetchImpl = (async (u: string) => { asked.push(u); return resp('%PDF-x'); }) as unknown as typeof fetch;
   await downloadPdf('https://invoice-one.com.evil.example/ViewerNew/pages/Y_GreeViewer_document/ABC123', { resolve: pub, fetchImpl });
   assert.deepEqual(asked, ['https://invoice-one.com.evil.example/ViewerNew/pages/Y_GreeViewer_document/ABC123']);
+});
+
+test('downloadPdf follows an HTML download page to the PDF (Morning / Kvish 6 style)', async () => {
+  const seen: string[] = [];
+  const fetchImpl = (async (u: string) => {
+    seen.push(u);
+    if (u === 'https://mail.vendor.example/track?x=1') return resp(null, { status: 302, headers: { location: 'https://app.vendor.example/doc/abc' } });
+    if (u === 'https://app.vendor.example/doc/abc') {
+      return resp('<html><body><a href="/help">עזרה</a><a href="/api/doc/abc/download">הורדת המסמך</a></body></html>', { headers: { 'content-type': 'text/html' } });
+    }
+    if (u === 'https://app.vendor.example/api/doc/abc/download') return resp('%PDF-1.7 doc', { headers: { 'content-type': 'application/octet-stream' } });
+    return resp('nope', { status: 404 });
+  }) as unknown as typeof fetch;
+  const b = await downloadPdf('https://mail.vendor.example/track?x=1', { resolve: pub, fetchImpl });
+  assert.equal(b.toString(), '%PDF-1.7 doc');
+  assert.deepEqual(seen.at(-1), 'https://app.vendor.example/api/doc/abc/download');
+});
+
+test('downloadPdf follows a meta refresh and an iframe viewer, keeps cookies, sends a browser user-agent', async () => {
+  const headersSeen: Record<string, string>[] = [];
+  const fetchImpl = (async (u: string, init: RequestInit) => {
+    headersSeen.push(init.headers as Record<string, string>);
+    if (u.endsWith('/start')) return resp('<meta http-equiv="refresh" content="0; url=/viewer">', { headers: { 'content-type': 'text/html', 'set-cookie': 'sid=42; Path=/' } });
+    if (u.endsWith('/viewer')) return resp('<html><iframe src="/files/inv.pdf"></iframe></html>', { headers: { 'content-type': 'text/html' } });
+    if (u.endsWith('/files/inv.pdf')) return resp('%PDF-1.4 x');
+    return resp('', { status: 404 });
+  }) as unknown as typeof fetch;
+  const b = await downloadPdf('https://v.example/start', { resolve: pub, fetchImpl });
+  assert.equal(b.toString(), '%PDF-1.4 x');
+  assert.match(headersSeen[0]['user-agent'], /Mozilla/);
+  assert.equal(headersSeen[2].cookie, 'sid=42');
+});
+
+test('downloadPdf: a page link to a private address is still blocked', async () => {
+  const fetchImpl = (async () => resp('<a href="http://127.0.0.1/x.pdf">PDF</a>', { headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch;
+  await assert.rejects(() => downloadPdf('https://v.example/p', { resolve: pub, fetchImpl }), code('link_blocked'));
+});
+
+test('downloadPdf accepts a PDF with a short preamble', async () => {
+  const b = await downloadPdf('https://a.example/x', { resolve: pub, fetchImpl: (async () => resp('\r\n%PDF-1.4 y')) as typeof fetch });
+  assert.equal(b.toString(), '%PDF-1.4 y');
 });

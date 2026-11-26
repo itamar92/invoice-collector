@@ -161,11 +161,26 @@ export function ConnectionsSection() {
       <div className="space-y-3 border-t border-line py-3">
         <div className="text-base font-semibold">{t('conn.meta')}</div>
         <p className={hintCls}>{t('connect.metaHint')}</p>
-        <SecretInput label={t('connect.metaCookies')} configured={secrets.meta_cookies} onSave={(v) => saveSecret('meta_cookies', v)} multiline />
+        <details className="text-sm">
+          <summary className="cursor-pointer font-medium">{t('connect.metaHowTo')}</summary>
+          <ol className={`${hintCls} mt-2 list-decimal space-y-1 ps-5`}>
+            <li>{t('connect.metaStep1')}</li>
+            <li>{t('connect.metaStep2')}</li>
+            <li>{t('connect.metaStep3')}</li>
+            <li>{t('connect.metaStep4')}</li>
+          </ol>
+          <p className={`${hintCls} mt-2`}>{t('connect.metaExampleTitle')}</p>
+          <pre className="ltr mt-1 overflow-x-auto rounded border border-line p-2 font-mono text-xs">{META_COOKIE_EXAMPLE}</pre>
+          <p className={`${hintCls} mt-2`}>{t('connect.metaFormats')}</p>
+        </details>
+        <SecretInput label={t('connect.metaCookies')} configured={secrets.meta_cookies} onSave={(v) => saveSecret('meta_cookies', v)} multiline placeholder={META_COOKIE_EXAMPLE} />
       </div>
     </div>
   );
 }
+
+/** Shown in the Meta cookies help and as the textarea placeholder: the shape to paste, with made-up values. */
+const META_COOKIE_EXAMPLE = 'c_user=100012345678901\nxs=12%3AaBcDeFgHiJkLmN%3A2%3A1732000000%3A-1%3A1234';
 
 // ---------- 2. AI ----------
 type AiMode = Settings['ai']['mode'];

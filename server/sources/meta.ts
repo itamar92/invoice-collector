@@ -116,14 +116,25 @@ export function metaReceiptUrl(r: Pick<MetaReceipt, 'accountId' | 'txid'>): stri
 const FACEBOOK_HOSTS = /^(?:[\w-]+\.)*facebook\.com$/i;
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 
-/** Accepts a raw `Cookie:` header value or a "name=value" list on separate lines; returns one header value. */
+/**
+ * Turns whatever the user pasted into one `Cookie:` header value. Accepts `name=value` pairs separated by
+ * `;`, `,` or new lines (with or without a leading `Cookie:`), and rows copied from the browser's DevTools
+ * cookie table (`name<TAB>value<TAB>domain...`). Anything else is dropped.
+ */
 export function normalizeCookies(raw: string): string {
-  return raw
-    .replace(/^\s*cookie:\s*/i, '')
-    .split(/[;\n]/)
-    .map((p) => p.trim())
-    .filter((p) => /^[^=\s]+=.+/.test(p))
-    .join('; ');
+  const pairs: string[] = [];
+  for (const line of raw.replace(/^\s*cookie:\s*/i, '').split(/\r?\n/)) {
+    if (line.includes('\t')) {
+      const [name, value] = line.split('\t').map((c) => c.trim());
+      if (name && value && /^[^=\s;,]+$/.test(name)) pairs.push(`${name}=${value}`);
+      continue;
+    }
+    for (const part of line.split(/[;,]/)) {
+      const p = part.trim();
+      if (/^[^=\s]+=.+/.test(p)) pairs.push(p.replace(/^([^=\s]+)=\s*/, '$1='));
+    }
+  }
+  return pairs.join('; ');
 }
 
 // ---- building a PDF from the email ----
