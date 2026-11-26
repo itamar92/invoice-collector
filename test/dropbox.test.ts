@@ -266,3 +266,32 @@ test('remove: delete_v2 on the filed path; a missing file is not_found', async (
   assert.deepEqual(JSON.parse(String(f.calls[1].init.body)), { path: '/Inv/2026/a.pdf' });
   assert.equal(await d.remove('/Inv/2026/gone.pdf'), 'not_found');
 });
+
+test('listFiles returns only files; a missing folder is empty', async () => {
+  const { impl, calls } = fakeFetch([
+    () => tokenOk(),
+    () => json(200, { entries: [
+      { '.tag': 'file', name: 'a.pdf', path_display: '/Inv/a.pdf', size: 12 },
+      { '.tag': 'folder', name: '2026', path_display: '/Inv/2026' },
+    ], has_more: false }),
+    () => json(409, { error_summary: 'path/not_found/..' }),
+  ]);
+  const d = new DropboxStorage({ fetchImpl: impl });
+  assert.deepEqual(await d.listFiles('Inv'), [{ name: 'a.pdf', path: '/Inv/a.pdf', size: 12 }]);
+  assert.equal(JSON.parse(String(calls[1].init.body)).path, '/Inv');
+  assert.deepEqual(await d.listFiles('nope'), []);
+});
+
+test('download returns the bytes; a missing scope is an error', async () => {
+  const bytes = Buffer.from('%PDF-1.4 x');
+  const { impl, calls } = fakeFetch([
+    () => tokenOk(),
+    () => new Response(bytes, { status: 200 }),
+    () => json(401, { error_summary: 'missing_scope/..' }),
+  ]);
+  const d = new DropboxStorage({ fetchImpl: impl });
+  assert.deepEqual(await d.download('/Inv/חשבון.pdf'), bytes);
+  assert.equal(calls[1].url, 'https://content.dropboxapi.com/2/files/download');
+  assert.match(hdr(calls[1], 'Dropbox-API-Arg'), /\\u05d7/);
+  await assert.rejects(d.download('/Inv/b.pdf'), /missing_scope/);
+});

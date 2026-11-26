@@ -614,6 +614,7 @@ export function CategoriesSection() {
               )}
           </div>
         </div>
+        <StorageInbox />
         <Field label={t('cat.folderTemplate')}>
           <input className={`${inputCls} ltr font-mono`} value={folderT} onChange={(e) => { setFolderT(e.target.value); setSaved(false); }} />
         </Field>
@@ -630,6 +631,24 @@ export function CategoriesSection() {
         <Saved show={saved} />
       </div>
       <ErrorText>{saving.error}</ErrorText>
+    </div>
+  );
+}
+
+/** Drop-in inbox: invoices downloaded by hand are put in the base folder and filed from there. Dropbox only. */
+function StorageInbox() {
+  const { s, save } = useSettings();
+  const a = useAction();
+  if (s.settings.storageProvider !== 'dropbox') return null;
+  return (
+    <div className="space-y-1 rounded-xl bg-ground p-3">
+      <label className="flex min-h-10 items-center gap-2 text-sm font-medium">
+        <input type="checkbox" className="size-5" checked={s.settings.storageInbox} disabled={a.busy}
+          onChange={(e) => { const v = e.target.checked; void a.run(() => save({ storageInbox: v })); }} />
+        {t('inbox.label')}
+      </label>
+      <p className={hintCls}>{t('inbox.hint', { folder: s.settings.storageRoot || '/' })}</p>
+      <ErrorText>{a.error}</ErrorText>
     </div>
   );
 }

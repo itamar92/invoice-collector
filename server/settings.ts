@@ -55,6 +55,12 @@ export type Settings = {
    * filed and sent to accounting without waiting for the owner. Off: it waits on the attention page.
    */
   autoApproveVendors: boolean;
+  /**
+   * Watch the storage root (only its top level, not the year folders) for PDFs and photos the owner drops there by
+   * hand, e.g. invoices downloaded from a supplier's website. Each one is taken in like an upload and the original
+   * is deleted once filed under the folder template. Dropbox only; needs the files.content.read permission.
+   */
+  storageInbox: boolean;
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

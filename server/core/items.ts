@@ -29,6 +29,8 @@ export interface ItemFilter {
   state?: ItemState | ItemState[]; messageId?: string; limit?: number; offset?: number; q?: string; vendorKey?: string;
   /** Exact category name; null = documents without one. */
   category?: string | null;
+  /** States left out (applied together with `state`). */
+  excludeState?: ItemState[];
   /** Year of the document's date (issue date, else arrival), as the summary page counts it. */
   year?: number;
   /** Default: newest arrival first. */
@@ -192,6 +194,10 @@ export function listItems(filter: ItemFilter = {}): Item[] {
     if (states.length === 0) return [];
     where.push(`state IN (${states.map(() => '?').join(',')})`);
     args.push(...states);
+  }
+  if (filter.excludeState?.length) {
+    where.push(`state NOT IN (${filter.excludeState.map(() => '?').join(',')})`);
+    args.push(...filter.excludeState);
   }
   if (filter.messageId) { where.push('message_id = ?'); args.push(filter.messageId); }
   if (filter.vendorKey) { where.push('vendor_key = ?'); args.push(filter.vendorKey); }

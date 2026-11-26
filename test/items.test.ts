@@ -88,6 +88,16 @@ test('listItems filters by state, message, q, paging', () => {
   assert.equal(listItems({ limit: 1, offset: 1 }).length, 1);
 });
 
+test('listItems excludeState leaves out ignored and dismissed', () => {
+  const a = createItem('m1', 'a.pdf', Buffer.from('1')).id;
+  const b = createItem('m1', 'b.pdf', Buffer.from('2')).id;
+  const c = createItem('m1', 'c.pdf', Buffer.from('3')).id;
+  transition(b, 'ignored');
+  transition(c, 'dismissed');
+  assert.deepEqual(listItems({ excludeState: ['ignored', 'dismissed'] }).map((i) => i.id), [a]);
+  assert.equal(listItems({}).length, 3);
+});
+
 test('thin setters and updateItem', () => {
   const { id } = createItem('m1', 'a.pdf', Buffer.from('x'));
   setItemText(id, 'hello');

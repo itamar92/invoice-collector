@@ -111,6 +111,8 @@ const ListQuery = z.object({
   year: z.coerce.number().int().min(2000).max(2100).optional(),
   /** Filed only (stored or done), as the summary counts them. Ignored when `state` is given. */
   filed: z.enum(['1']).optional(),
+  /** Leave out ignored and dismissed (rejected) documents. Ignored when `state` is given. */
+  hideClosed: z.enum(['1']).optional(),
   sort: z.enum(ITEM_SORTS).optional(),
   dir: z.enum(['asc', 'desc']).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -171,6 +173,7 @@ const SettingsPatch = z.object({
   shareRecipes: z.boolean(),
   ownTaxIds: z.array(z.string().trim().regex(/^\d{8,9}$/)).max(5),
   autoApproveVendors: z.boolean(),
+  storageInbox: z.boolean(),
 }).partial().strict();
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown> | unknown): RequestHandler =>
@@ -248,6 +251,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const filter = {
       state: q.state ?? (q.filed ? ['stored', 'done'] as ItemState[] : undefined), q: q.q || undefined, vendorKey: q.vendor,
       category: q.category === '-' ? null : q.category, year: q.year, sort: q.sort, dir: q.dir,
+      excludeState: q.hideClosed && !q.state ? ['ignored', 'dismissed'] as ItemState[] : undefined,
     };
     const items = (worthIds
       ? listItems({ ...filter, limit: 100_000 }).filter((i) => worthIds.has(i.id)).slice(q.offset, q.offset + q.limit)
