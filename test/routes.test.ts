@@ -8,7 +8,7 @@ import { openDb } from '../server/db.js';
 import { createApp } from '../server/app.js';
 import { apiRouter, backfillJobDone, type ApiContext } from '../server/routes.js';
 import { resetLoginLimiter } from '../server/auth.js';
-import { createEmail, updateItem, createItem, getItem, setItemFields, setItemText, setItemVendor, transition } from '../server/core/items.js';
+import { createEmail, createPlaceholderItem, updateItem, createItem, getItem, setItemFields, setItemText, setItemVendor, transition } from '../server/core/items.js';
 import { recordIngestFailure } from '../server/core/ingestFailures.js';
 import { compileRecipe } from '../server/core/recipe.js';
 import { saveRecipe, getVendor, upsertVendor, setVendorStatus } from '../server/core/recipeStore.js';
@@ -520,6 +520,29 @@ test('GET /api/gmail/labels lists labels from the live Gmail source; 503 when no
   const r = await bad.call('GET', '/api/gmail/labels');
   assert.equal(r.status, 502);
   assert.deepEqual(await r.json(), { error: 'gmail_unavailable' });
+});
+
+test('retry of an item with no PDF reads its email again (also one an old retry left as unreadable_pdf)', async () => {
+  createEmail({ messageId: 'm-np', threadId: 't', sender: 's@x.com', subject: 's', receivedAt: '2026-06-01T00:00:00Z', mode: 'ongoing' });
+  const id = createPlaceholderItem('m-np', 'link_not_pdf');
+  transition(id, 'queued');
+  transition(id, 'needs_attention', 'unreadable_pdf', 'no pdf'); // what the old retry ended in
+  const fetched: string[] = [];
+  const mail = {
+    fetchMessage: async (mid: string) => {
+      fetched.push(mid);
+      return { id: mid, threadId: 't', sender: 's@x.com', subject: 's', receivedAt: '2026-06-01T00:00:00Z',
+        pdfs: [{ name: 'inv.pdf', data: Buffer.from('%PDF-1.4 refetched') }], html: '', text: '' };
+    },
+  } as unknown as GmailSource;
+  const { call } = await boot({ getDeps: () => ({ deps: deps(), gmail: mail }) });
+  const r = (await (await call('POST', `/api/items/${id}/retry`)).json()) as any;
+  assert.deepEqual(fetched, ['m-np']);
+  assert.equal(r.refetched, 1);
+  assert.equal(getItem(id)!.state, 'dismissed');
+  const off = await boot({ getDeps: () => { throw new Error('not connected'); } });
+  createEmail({ messageId: 'm-np2', threadId: 't', sender: 's@x.com', subject: 's', receivedAt: '2026-06-01T00:00:00Z', mode: 'ongoing' });
+  assert.equal((await off.call('POST', `/api/items/${createPlaceholderItem('m-np2', 'no_document')}/retry`)).status, 503);
 });
 
 test('retry resets attempts and nextAttemptAt; storage_error -> ready, accounting_error -> stored', async () => {
