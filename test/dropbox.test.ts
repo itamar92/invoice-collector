@@ -257,3 +257,12 @@ test('listFolders: folders only, sorted, follows has_more; top is ""; a missing 
   const missing = fakeFetch([() => tokenOk(), () => json(409, { error_summary: 'path/not_found/..' })]);
   await assert.rejects(new DropboxStorage({ fetchImpl: missing.impl }).listFolders('/nope'), (e: Error) => e.name === 'FolderNotFoundError');
 });
+
+test('remove: delete_v2 on the filed path; a missing file is not_found', async () => {
+  const f = fakeFetch([() => tokenOk(), () => json(200, { metadata: {} }), () => json(409, { error_summary: 'path_lookup/not_found/..' })]);
+  const d = new DropboxStorage({ fetchImpl: f.impl });
+  assert.equal(await d.remove('/Inv/2026/a.pdf'), 'removed');
+  assert.equal(f.calls[1].url, 'https://api.dropboxapi.com/2/files/delete_v2');
+  assert.deepEqual(JSON.parse(String(f.calls[1].init.body)), { path: '/Inv/2026/a.pdf' });
+  assert.equal(await d.remove('/Inv/2026/gone.pdf'), 'not_found');
+});

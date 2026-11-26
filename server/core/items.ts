@@ -113,11 +113,14 @@ export function createItem(
   })();
 }
 
-export function createPlaceholderItem(messageId: string, reason: Reason, attachmentName: string | null = null): string {
+/** `detail`: what exactly failed (e.g. the link's host and the error), kept on the history for diagnosis. */
+export function createPlaceholderItem(
+  messageId: string, reason: Reason, attachmentName: string | null = null, detail?: string,
+): string {
   const id = randomUUID();
   getDb().transaction(() => {
     insertItem(id, messageId, attachmentName, null, null, 'needs_attention', reason);
-    addEvent(id, null, 'needs_attention', reason);
+    addEvent(id, null, 'needs_attention', detail ? `${reason}: ${detail}`.slice(0, 500) : reason);
   })();
   return id;
 }

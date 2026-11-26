@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Item, Vendor, VendorStatus } from '../api.js';
 import {
-  Avatar, Button, ButtonLink, Card, Dot, Icon, ErrorText, fmtDate, fmtDateTime, fmtMoney, itemTitle, Loading, Notice, PageTitle,
+  Avatar, Button, ButtonLink, Card, Dot, EmailLine, Icon, ErrorText, fmtDate, fmtDateTime, fmtMoney, itemTitle, Loading, Notice, PageTitle,
   reasonLabel, rowCls, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
@@ -81,6 +81,7 @@ export function ItemList({ items }: { items: Item[] }) {
             <Avatar name={itemTitle(i)} />
             <span className="min-w-0">
               <span className="block truncate font-medium">{itemTitle(i)}</span>
+              <EmailLine item={i} />
               <span className="num block text-[13px] text-muted">{fmtDate(i.fields?.issueDate ?? i.createdAt)}</span>
             </span>
             <span className="num font-semibold">{fmtMoney(i.fields?.total, i.fields?.currency)}</span>

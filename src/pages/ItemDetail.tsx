@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import type { ExtractedFields, ItemState, Reason, Reapplied, RecipeCheck } from '../api.js';
+import type { ExtractedFields, ItemDetail as ItemDetailT, ItemState, Reason, Reapplied, RecipeCheck } from '../api.js';
 import { RecipeCheckView } from '../components/RecipeCheck.js';
 import {
   AiThinking, Button, Card, ErrorText, Field, fmtDateTime, hintCls, Icon, inputCls, itemTitle, Loading, Notice, reasonLabel, rowCls,
@@ -52,6 +52,8 @@ export default function ItemDetail() {
   const [msg, setMsg] = useState<string | null>(null);
   const [reparseNote, setReparseNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
   const act = useAction();
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [ignoreVendor, setIgnoreVendor] = useState(false);
   // Arriving straight from an upload: say what happened to the file.
   const uploaded = (useLocation().state as { uploaded?: 'new' | 'duplicate' } | null)?.uploaded;
 
@@ -120,6 +122,17 @@ export default function ItemDetail() {
     if (!window.confirm(t(item.storagePath ? 'item.dismissFiledConfirm' : 'item.dismissConfirm'))) return;
     void act.run(async () => { await api.dismiss(item.id); await leave(t('item.dismissedNamed', { name: itemTitle(item) })); }, 'dismiss');
   };
+  const remove = () => act.run(async () => {
+    const r = await api.remove(item.id, ignoreVendor);
+    const parts = [t('remove.done', { name: itemTitle(item) })];
+    if (r.storage === 'removed' || r.storage === 'not_found' || r.storage === 'failed') parts.push(t(`remove.storage.${r.storage}`));
+    if (r.morning === 'removed') parts.push(t('remove.morning.removed'));
+    if (r.morning === 'manual') {
+      const k = `remove.morning.${r.morningReason}`;
+      parts.push(['approved_expense', 'sent_by_email', 'draft_not_found'].includes(r.morningReason ?? '') ? t(k as MessageKey) : t('remove.morning.manual'));
+    }
+    await leave(parts.join(' '));
+  }, 'remove');
   const restore = () => act.run(async () => {
     await api.restore(item.id);
     await refresh(t('item.restoredNamed', { name: itemTitle(item) }));
@@ -148,6 +161,7 @@ export default function ItemDetail() {
         <div className="mt-1.5"><StateBadge state={item.state} /></div>
       </div>
       {item.reason && item.state === 'needs_attention' && <ErrorText>{t('common.reason')}: {reasonLabel(item.reason)}</ErrorText>}
+      <SourceEmail item={item} />
       {uploaded && !msg && !(uploaded === 'new' && item.state === 'needs_attention') && <Notice tone={uploaded === 'new' ? 'ok' : 'warn'}>{t(`upload.${uploaded}`)}</Notice>}
       {msg && <Notice tone="ok">{msg}</Notice>}
       {madeFromEmail && <Notice tone="warn">{t('item.madeFromEmail')}</Notice>}
@@ -209,8 +223,27 @@ export default function ItemDetail() {
             {editable && !item.storagePath && item.hasText && <Button variant="ghost" loading={act.is('reparse')} disabled={act.busy} onClick={reparse}>{t('item.reparse')}</Button>}
             {item.state === 'needs_attention' && <Button variant="secondary" loading={act.is('retry')} disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
             {(item.state === 'dismissed' || (item.state === 'ignored' && !invoiceOf)) && <Button variant="secondary" loading={act.is('restore')} disabled={act.busy} onClick={restore}>{t('item.restore')}</Button>}
-            {item.state !== 'dismissed' && item.state !== 'ignored' && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
+            {item.state !== 'dismissed' && item.state !== 'ignored' && !(item.storagePath || item.accountingRef) && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
+            {(item.storagePath || item.accountingRef) && !removeOpen && <Button variant="danger" className="ms-auto" disabled={act.busy} onClick={() => setRemoveOpen(true)}><Icon name="trash" />{t('remove.button')}</Button>}
           </div>
+          {removeOpen && (
+            <div className="mt-3 space-y-2 rounded-xl border border-alert/40 bg-alert-tint p-3 text-sm">
+              <div className="font-semibold text-alert-deep">{t('remove.title')}</div>
+              <p>{t('remove.body')}</p>
+              {item.storagePath && <p>{t('remove.bodyFiled')}</p>}
+              {item.accountingRef && <p>{t('remove.bodySent')}</p>}
+              {item.vendorKey && (
+                <label className="flex min-h-10 items-center gap-2">
+                  <input type="checkbox" className="size-5" checked={ignoreVendor} onChange={(e) => setIgnoreVendor(e.target.checked)} />
+                  {t('remove.ignoreVendor', { name: item.fields?.vendorName || item.vendorKey })}
+                </label>
+              )}
+              <div className="flex gap-2">
+                <Button variant="danger" loading={act.is('remove')} disabled={act.busy} onClick={remove}><Icon name="trash" />{t('remove.confirm')}</Button>
+                <Button variant="secondary" className="bg-white" disabled={act.busy} onClick={() => setRemoveOpen(false)}>{t('common.cancel')}</Button>
+              </div>
+            </div>
+          )}
           <ErrorText>{act.error}</ErrorText>
 
           {item.hasText && (editable || item.vendorKey) && (
@@ -244,6 +277,34 @@ export default function ItemDetail() {
           ))}
         </ol>
       </Card>
+    </div>
+  );
+}
+
+/** Which email the document came from, with a link to it, and what exactly went wrong when nothing was read. */
+function SourceEmail({ item }: { item: ItemDetailT }) {
+  const e = item.email;
+  if (!e) return null;
+  // Placeholder of an email whose link failed: the first history note keeps the host and the error.
+  const detail = item.state === 'needs_attention' && !item.hasPdf
+    ? item.events.map((x) => x.note ?? '').find((n) => /^(link_\w+|no_document): /.test(n))?.replace(/^[\w]+: /, '') ?? null
+    : null;
+  return (
+    <div className="panel space-y-1.5 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 font-semibold"><Icon name="mail" className="size-4" />{t('item.email')}</span>
+        {e.gmailUrl && (
+          <a href={e.gmailUrl} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-9 items-center gap-1 font-semibold text-accent underline">
+            {t('item.email.open')}<Icon name="out" className="size-4" />
+          </a>
+        )}
+      </div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+        {e.sender && <><dt className="text-muted">{t('item.email.from')}</dt><dd className="break-all"><bdi className="ltr">{e.sender}</bdi></dd></>}
+        {e.subject && <><dt className="text-muted">{t('item.email.subject')}</dt><dd className="[overflow-wrap:anywhere]"><bdi>{e.subject}</bdi></dd></>}
+        {e.receivedAt && <><dt className="text-muted">{t('item.email.received')}</dt><dd className="num">{fmtDateTime(e.receivedAt)}</dd></>}
+        {detail && <><dt className="text-muted">{t('item.failDetail')}</dt><dd className="[overflow-wrap:anywhere]"><bdi className="ltr font-mono text-xs">{detail}</bdi></dd></>}
+      </dl>
     </div>
   );
 }

@@ -55,7 +55,8 @@ export interface GmailSource {
   fetchMessage(id: string): Promise<GmailMessage>;
   /** Sender, subject and date only (format=metadata): no body, no attachments. */
   fetchHeaders(id: string): Promise<{ id: string; sender: string; subject: string; receivedAt: string }>;
-  markHandled(id: string): Promise<void>;
+  /** Adds the done label; `read` also marks the message read. */
+  markHandled(id: string, opts?: { read?: boolean }): Promise<void>;
   /** Takes the done label off these messages again (reset of test data). Optional: fakes may omit it. */
   unmarkHandled?(ids: string[]): Promise<void>;
   /** User label names for the setup label picker (optional: fakes may omit it). */
@@ -196,11 +197,11 @@ export class GmailClient implements GmailSource {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  /** Adds the done label. Never removes labels and never marks the message read. */
-  async markHandled(id: string): Promise<void> {
+  /** Adds the done label; with `read`, also takes off UNREAD. Never removes any other label. */
+  async markHandled(id: string, opts: { read?: boolean } = {}): Promise<void> {
     const labelId = await this.ensureDoneLabel();
     await this.api(`${API}/messages/${encodeURIComponent(id)}/modify`, {
-      method: 'POST', json: { addLabelIds: [labelId] },
+      method: 'POST', json: { addLabelIds: [labelId], ...(opts.read ? { removeLabelIds: ['UNREAD'] } : {}) },
     });
   }
 
@@ -366,6 +367,7 @@ export async function ingestMessage(
     }
   }
   let failure: Reason | null = null;
+  let failureDetail: string | undefined;
   const meta = pdfs.length === 0 && notPdf.length === 0 ? parseMetaReceipt(msg.html) : null;
   if (meta) {
     pdfs = [await metaReceiptDocument(meta, msg.receivedAt, downloadOpts)];
@@ -376,7 +378,10 @@ export async function ingestMessage(
         got.push({ name: 'link.pdf', data: await downloadPdf(url, downloadOpts) });
         break; // R20: the first successful PDF wins
       } catch (e) {
-        failure ??= e instanceof LinkError ? e.code : 'link_failed';
+        if (!failure) {
+          failure = e instanceof LinkError ? e.code : 'link_failed';
+          failureDetail = `${linkHost(url)} - ${e instanceof Error ? e.message : String(e)}`;
+        }
       }
     }
     pdfs = got;
@@ -391,7 +396,7 @@ export async function ingestMessage(
     });
     for (const p of notPdf) createPlaceholderItem(id, 'no_document', p.name);
     if (pdfs.length === 0 && notPdf.length === 0) {
-      createPlaceholderItem(id, failure ?? 'no_document');
+      createPlaceholderItem(id, failure ?? 'no_document', null, failureDetail);
       return { skipped: false, items: 1 };
     }
     for (const p of pdfs) createItem(id, p.name, p.data, p.note);
@@ -399,13 +404,19 @@ export async function ingestMessage(
   })();
 }
 
-/** Labels the Gmail message once every item for it is terminal. Idempotent. */
+const linkHost = (url: string) => { try { return new URL(url).hostname; } catch { return 'link'; } };
+
+/**
+ * Labels the Gmail message once every item for it is terminal. Idempotent. A message whose invoice was collected
+ * (an item reached done) is also marked read, so the inbox shows what was taken care of; one where nothing was
+ * collected stays unread.
+ */
 export async function markHandledIfComplete(gmail: GmailSource, messageId: string): Promise<boolean> {
   const email = getEmail(messageId);
   if (!email || email.gmailMarked) return false;
   const items = listItems({ messageId, limit: 1000 });
   if (items.length === 0 || !items.every((i) => isTerminal(i.state))) return false;
-  await gmail.markHandled(messageId);
+  await gmail.markHandled(messageId, { read: items.some((i) => i.state === 'done') });
   getDb().prepare('UPDATE emails SET gmail_marked = 1 WHERE message_id = ?').run(messageId);
   return true;
 }

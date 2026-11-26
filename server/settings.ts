@@ -49,6 +49,11 @@ export type Settings = {
   shareRecipes: boolean;
   /** Tax ids (ע.מ / ח.פ) of the owner's own business: documents it issued are copies, not expenses. */
   ownTaxIds: string[];
+  /**
+   * A new supplier on an ongoing (not first-import) document is approved as business at once, so the document is
+   * filed and sent to accounting without waiting for the owner. Off: it waits on the attention page.
+   */
+  autoApproveVendors: boolean;
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

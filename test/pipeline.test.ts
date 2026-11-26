@@ -20,13 +20,15 @@ import { AiOutputError, AiUnavailableError, type AiProvider, type AiRequest } fr
 import { EXTRACT_SYSTEM, RECIPE_SYSTEM } from '../server/ai/prompts.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
 import { updateSettings } from '../server/settings.js';
-import { processItem, reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
+import { listNotifications, markNotificationsRead, unreadNotifications } from '../server/core/notifications.js';
+import { autoApproveWaitingVendors, processItem, reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
 import { itemUsage, usageSummary } from '../server/ai/usage.js';
 
 // ---------- synthetic documents ----------
 
 const NOW = new Date('2026-06-15T09:00:00Z');
-const SETTINGS = { ...IL_DEFAULTS, storageRoot: '/Inv' };
+// New suppliers wait for the owner's decision here; auto-approval has its own tests.
+const SETTINGS = { ...IL_DEFAULTS, storageRoot: '/Inv', autoApproveVendors: false };
 
 function invoiceText(o: { vendor?: string; num?: string; date?: string; total?: string; kind?: string } = {}): string {
   return [
@@ -1145,4 +1147,51 @@ test('a zero-total credit note is not treated as a free-plan bill', async () => 
   ai.overrideFields = { total: 0, docType: 'credit_note' };
   const { id } = newItem(invoiceText({ total: '0' }), { sender: 'billing@cloud.example' });
   assert.notEqual(await processItem(id, deps({ ai })), 'ignored');
+});
+
+// ---------- automatic flow: new suppliers approved, a notification per processed document ----------
+
+const AUTO = { ...SETTINGS, autoApproveVendors: true };
+
+test('auto-approve on: a new supplier\'s ongoing invoice is filed and sent without waiting, and announced', async () => {
+  const acc = fakeAccounting();
+  const { id } = newItem(invoiceText());
+  assert.equal(await processItem(id, deps({ ai: fakeAi(), accounting: acc, settings: AUTO })), 'done');
+  assert.equal(getVendor('demo-widgets-ltd')?.status, 'business');
+  assert.equal(acc.calls.length, 1);
+  assert.ok(notes(id).includes('vendor_auto_approved'));
+  const [n] = listNotifications();
+  assert.equal(n!.itemId, id);
+  assert.equal(n!.data.vendor, 'Demo Widgets Ltd');
+  assert.equal(n!.data.sent, true);
+  assert.equal(n!.data.total, 117);
+  assert.equal(unreadNotifications(), 1);
+  assert.equal(markNotificationsRead(), 1);
+  assert.equal(unreadNotifications(), 0);
+});
+
+test('auto-approve on: a first-import (backfill) document still waits for the supplier decision, no notification', async () => {
+  const { id } = newItem(invoiceText(), { mode: 'backfill' });
+  assert.equal(await processItem(id, deps({ ai: fakeAi(), settings: AUTO })), 'awaiting_vendor');
+  assert.equal(getVendor('demo-widgets-ltd')?.status, 'unreviewed');
+  assert.equal(listNotifications().length, 0);
+});
+
+test('auto-approve: documents already waiting on a supplier move on when the setting is on', async () => {
+  const acc = fakeAccounting();
+  const { id } = newItem(invoiceText());
+  assert.equal(await processItem(id, deps({ ai: fakeAi(), accounting: acc })), 'awaiting_vendor');
+  assert.deepEqual(await autoApproveWaitingVendors(deps({ ai: fakeAi(), accounting: acc })), [], 'setting off: nothing');
+  assert.deepEqual(await autoApproveWaitingVendors(deps({ ai: fakeAi(), accounting: acc, settings: AUTO })), ['demo-widgets-ltd']);
+  assert.equal(getItem(id)!.state, 'done');
+  assert.equal(acc.calls.length, 1);
+});
+
+test('a personal supplier\'s document is announced as filed, not sent', async () => {
+  knownVendor('acme', 'billing@acme.example', 'personal');
+  const { id } = newItem(invoiceText());
+  assert.equal(await processItem(id, deps()), 'done');
+  const [n] = listNotifications();
+  assert.equal(n!.itemId, id);
+  assert.equal(n!.data.sent, false);
 });

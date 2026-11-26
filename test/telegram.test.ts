@@ -31,7 +31,7 @@ beforeEach(() => {
 const ai: AiProvider = { name: 'fake', supportsPdf: true, ping: async () => {}, completeJson: async () => FIELDS };
 const deps = (): Deps => ({
   storage: { exists: async () => ({ exists: false, sameContent: false }), put: async (f, n) => ({ path: `${f}/${n}`, existed: false }) },
-  accounting: null, ai, settings: getSettings(), now: () => NOW,
+  accounting: null, ai, settings: { ...getSettings(), autoApproveVendors: false }, now: () => NOW,
 });
 
 function fakeApi(over: Partial<TelegramApi> = {}) {

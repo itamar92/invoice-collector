@@ -758,6 +758,62 @@ export const he = {
   'error.invite_email_mismatch': 'ההזמנה הזו נועדה לאימייל אחר',
   'error.cannot_disable_admin': 'אי אפשר להשבית את הבעלים',
   'error.forbidden': 'אין הרשאה',
+
+  // source email
+  'item.email': 'המייל שממנו הגיע',
+  'item.email.from': 'מאת',
+  'item.email.subject': 'נושא',
+  'item.email.received': 'התקבל',
+  'item.email.open': 'פתיחה ב-Gmail',
+  'item.failDetail': 'פרטי התקלה',
+
+  // removing a document
+  'remove.button': 'הסרה מהחשבוניות',
+  'remove.title': 'להסיר את המסמך?',
+  'remove.body': 'המסמך יוסר מהרשימה ומהסיכום.',
+  'remove.bodyFiled': 'הקובץ יימחק מ-{cloud} (אפשר לשחזר אותו משם עד 30 יום).',
+  'remove.bodySent': 'נבקש מ-Morning למחוק את הטיוטה. אם היא כבר אושרה כהוצאה, צריך למחוק אותה ב-Morning.',
+  'remove.ignoreVendor': 'להפסיק לאסוף מסמכים מ-{name}',
+  'remove.ignoreVendors': 'להפסיק לאסוף מסמכים מהספקים האלה',
+  'remove.confirm': 'הסרה',
+  'remove.done': '{name}: הוסר.',
+  'remove.storage.removed': 'הקובץ נמחק מ-{cloud}.',
+  'remove.storage.not_found': 'הקובץ כבר לא היה ב-{cloud}.',
+  'remove.storage.failed': 'לא הצלחנו למחוק את הקובץ מ-{cloud} — מחקו אותו שם ידנית.',
+  'remove.morning.removed': 'הטיוטה נמחקה מ-Morning.',
+  'remove.morning.manual': 'את מה שנשלח ל-Morning צריך למחוק שם ידנית.',
+  'remove.morning.approved_expense': 'המסמך כבר אושר כהוצאה ב-Morning — מחקו אותו שם.',
+  'remove.morning.sent_by_email': 'המסמך נשלח ל-Morning במייל — מחקו את הטיוטה שם.',
+  'remove.morning.draft_not_found': 'לא מצאנו את הטיוטה ב-Morning (אולי כבר אושרה או נמחקה) — בדקו שם.',
+  'remove.select': 'בחירה להסרה',
+  'remove.selectDone': 'סיום בחירה',
+  'remove.selected': '{n} נבחרו',
+  'remove.selectedButton': 'הסרת {n} מסמכים',
+  'remove.bulkConfirm': 'להסיר {n} מסמכים? קבצים שתויקו יימחקו מ-{cloud} (אפשר לשחזר משם עד 30 יום), וטיוטות ב-Morning יימחקו אם אפשר.',
+  'remove.bulkDone': 'הוסרו {n} מסמכים.',
+  'remove.bulkManual': 'ב-{n} מהם צריך למחוק את מה שנשלח ל-Morning ידנית.',
+  'remove.bulkFailed': 'ב-{n} מהם לא הצלחנו למחוק את הקובץ מ-{cloud}.',
+
+  // notifications
+  'notif.title': 'התראות',
+  'notif.empty': 'אין התראות עדיין. כשחשבונית חדשה תעובד, היא תופיע כאן.',
+  'notif.processed': 'חשבונית חדשה עובדה',
+  'notif.sent': 'תויקה ב-{cloud} ונשלחה ל-Morning',
+  'notif.filed': 'תויקה ב-{cloud}',
+  'notif.markAll': 'סימון הכול כנקרא',
+  'notif.enable': 'הפעלת התראות במכשיר הזה',
+  'notif.enabled': 'התראות פעילות במכשיר הזה',
+  'notif.blocked': 'ההתראות חסומות לאתר הזה — אפשר להתיר אותן בהגדרות הדפדפן או הטלפון',
+  'notif.test': 'שליחת התראת בדיקה',
+  'notif.disable': 'כיבוי',
+  'notif.installFirst': 'באייפון: הוסיפו את האפליקציה למסך הבית (שיתוף ← הוספה למסך הבית), פתחו אותה משם והפעילו כאן התראות.',
+  'notif.unsupported': 'הדפדפן הזה לא תומך בהתראות.',
+  'notif.pushFailed': 'שליחת ההתראה נכשלה',
+
+  // automatic flow
+  'auto.title': 'עיבוד אוטומטי',
+  'auto.label': 'לאשר ספקים חדשים אוטומטית כעסקיים',
+  'auto.hint': 'חשבונית מספק חדש תתויק ותישלח ל-Morning בלי לחכות לאישור. ספק פרטי או לא רלוונטי אפשר לשנות בכל רגע בדף הספקים. מסמכי הייבוא הראשון תמיד מחכים לאישור.',
 } as const;
 
 export type MessageKey = keyof typeof he;

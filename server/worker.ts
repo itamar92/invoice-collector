@@ -5,7 +5,7 @@ import { recordIngestFailure } from './core/ingestFailures.js';
 import { getItem, listItems, noteItem, transition } from './core/items.js';
 import type { Item } from './core/items.js';
 import { scanMissed } from './core/missed.js';
-import { processItem, setVendorDecision } from './core/pipeline.js';
+import { autoApproveWaitingVendors, processItem, setVendorDecision } from './core/pipeline.js';
 import type { VendorStatus } from './core/recipeStore.js';
 import type { Deps } from './core/types.js';
 import { ingestMessage, markHandledIfComplete } from './sources/gmail.js';
@@ -77,6 +77,8 @@ export function startWorker(getDeps: () => WorkerContext, opts: WorkerOptions = 
           try { await setVendorDecision(v.key, v.status, deps); } catch (e) { errors.push(msg(e)); }
         }
       });
+
+      await step(async () => { await autoApproveWaitingVendors(deps); }); // setting on: nothing waits for the owner
 
       await step(async () => {
         for (const it of dueItems(now.toISOString())) {

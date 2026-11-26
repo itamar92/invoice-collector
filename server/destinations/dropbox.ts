@@ -110,6 +110,18 @@ export class DropboxStorage implements StorageDestination {
     return { name: typeof md?.name === 'string' ? md.name : name, path: typeof md?.path_display === 'string' ? md.path_display : p };
   }
 
+  /** files/delete_v2: Dropbox keeps the deleted file in its "deleted files" for at least 30 days. */
+  async remove(path: string): Promise<'removed' | 'not_found'> {
+    const r = await this.call((tok) => this.f('https://api.dropboxapi.com/2/files/delete_v2', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }));
+    if (r.status === 409 && /not_found/.test(summary(r.body))) return 'not_found';
+    this.assertOk(r);
+    return 'removed';
+  }
+
   private assertOk(r: ApiResult): void {
     if (r.status >= 200 && r.status < 300) return;
     const msg = `Dropbox ${r.status}: ${summary(r.body) || 'error'}`;

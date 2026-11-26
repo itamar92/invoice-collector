@@ -1,5 +1,6 @@
 import { listIngestFailures } from './core/ingestFailures.js';
 import { listMissed } from './core/missed.js';
+import { unreadNotifications } from './core/notifications.js';
 import type { ItemState } from './core/types.js';
 import { getDb } from './db.js';
 import { getSecret, SECRET_KEYS } from './secrets.js';
@@ -48,6 +49,7 @@ export function summary(now: Date) {
     lastTickAt: s.lastTickAt,
     lastTickError: sanitizeError(s.lastTickError),
     lastAiSuccessAt: s.lastAiSuccessAt,
+    notificationsUnread: unreadNotifications(),
   };
 }
 

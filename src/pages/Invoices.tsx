@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
-import type { ItemSort, ItemState } from '../api.js';
+import type { Item, ItemSort, ItemState } from '../api.js';
 import {
-  Avatar, Button, Empty, ErrorText, Icon, fmtDate, fmtMoney, inputCls, itemTitle, Loading, PageTitle, reasonLabel, rowCls, StateBadge,
-  stateLabel, useLoad,
+  Avatar, Button, EmailLine, Empty, ErrorText, Icon, fmtDate, fmtMoney, inputCls, itemTitle, Loading, Notice, PageTitle, reasonLabel, rowCls,
+  StateBadge, stateLabel, useAction, useApp, useLoad,
 } from '../components/ui.js';
 import { t } from '../i18n/he.js';
 
@@ -30,6 +30,13 @@ export default function Invoices() {
   const filed = params.get('filed') === '1';
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
+  // Selection mode: pick documents that should not have been collected and remove them together.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [ignoreVendors, setIgnoreVendors] = useState(false);
+  const [outcome, setOutcome] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
+  const removing = useAction();
+  const { refreshSummary } = useApp();
 
   const list = useLoad(
     () => api.items({ state, q: q || undefined, category, year, filed, sort, dir, limit: PAGE, offset: page * PAGE }),
@@ -42,6 +49,28 @@ export default function Invoices() {
     setParams(n);
   };
   const items = list.data?.items ?? [];
+  const removable = (i: Item) => i.state !== 'dismissed';
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); setIgnoreVendors(false); };
+  const removePicked = () => {
+    const ids = items.filter((i) => picked.has(i.id)).map((i) => i.id);
+    if (ids.length === 0 || !window.confirm(t('remove.bulkConfirm', { n: ids.length }))) return;
+    void removing.run(async () => {
+      setOutcome(null);
+      let manual = 0; let failed = 0;
+      for (const id of ids) {
+        const r = await api.remove(id, ignoreVendors);
+        if (r.morning === 'manual') manual++;
+        if (r.storage === 'failed') failed++;
+      }
+      const parts = [t('remove.bulkDone', { n: ids.length })];
+      if (manual) parts.push(t('remove.bulkManual', { n: manual }));
+      if (failed) parts.push(t('remove.bulkFailed', { n: failed }));
+      setOutcome({ tone: manual || failed ? 'warn' : 'ok', text: parts.join(' ') });
+      stopSelecting();
+      await list.reload(); await refreshSummary();
+    });
+  };
   const sortBy = (col: ItemSort) => set({ sort: col, dir: sort === col ? (dir === 'asc' ? 'desc' : 'asc') : FIRST_DIR[col] });
   /** A column title that sorts the list by it; a second click flips the direction. */
   const Head = ({ col, className = '', children }: { col: ItemSort; className?: string; children: string }) => (
@@ -64,7 +93,13 @@ export default function Invoices() {
 
   return (
     <div className="space-y-4">
-      <PageTitle>{t('invoices.title')}</PageTitle>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <PageTitle>{t('invoices.title')}</PageTitle>
+        <Button variant={selecting ? 'secondary' : 'ghost'} onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+          {!selecting && <Icon name="trash" />}{selecting ? t('remove.selectDone') : t('remove.select')}
+        </Button>
+      </div>
+      {outcome && <Notice tone={outcome.tone}>{outcome.text}</Notice>}
       <form className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[14rem_minmax(0,1fr)_auto]" onSubmit={(e) => { e.preventDefault(); set({ q: text.trim() || null }); }}>
         <select className={`${inputCls} col-span-2 sm:col-span-1`} value={state ?? ''} onChange={(e) => set({ state: e.target.value || null })} aria-label={t('common.state')}>
           <option value="">{t('common.all')}</option>
@@ -96,11 +131,19 @@ export default function Invoices() {
         </div>
         {list.loading && !list.data ? <Loading rows={6} /> : list.error ? <ErrorText>{list.error}</ErrorText> : items.length === 0 ? <Empty /> : (
           <ul>
-            {items.map((i) => (
-              <li key={i.id} className={rowCls}>
-                <Link to={`/items/${i.id}`} className={`${cols} -mx-2 min-h-14 items-center rounded-xl px-2 py-2 transition-colors hover:bg-ground`}>
-                  <span className="col-start-1 row-span-2 row-start-1 md:row-span-1"><Avatar name={itemTitle(i)} /></span>
-                  <span className="col-start-2 row-start-1 truncate font-medium">{itemTitle(i)}</span>
+            {items.map((i) => {
+              const on = picked.has(i.id);
+              const rowBody = (
+                <>
+                  <span className="col-start-1 row-span-2 row-start-1 md:row-span-1">
+                    {selecting
+                      ? <span className={`grid size-9 place-items-center rounded-full border-2 ${on ? 'border-alert bg-alert text-white' : 'border-line-strong bg-white'} ${removable(i) ? '' : 'opacity-30'}`}>{on && <Icon name="check" className="size-4" />}</span>
+                      : <Avatar name={itemTitle(i)} />}
+                  </span>
+                  <span className="col-start-2 row-start-1 min-w-0">
+                    <span className="block truncate font-medium">{itemTitle(i)}</span>
+                    <EmailLine item={i} />
+                  </span>
                   <span className="hidden min-w-0 truncate text-sm md:col-start-3 md:row-start-1 md:block">{i.fields?.category ?? <span className="text-idle">—</span>}</span>
                   <span className="col-start-2 row-start-2 min-w-0 md:col-start-4 md:row-start-1">
                     <StateBadge state={i.state} />
@@ -109,11 +152,32 @@ export default function Invoices() {
                   </span>
                   <span className="num col-start-3 row-start-2 justify-self-end text-[13px] text-muted md:col-start-5 md:row-start-1 md:justify-self-start">{fmtDate(i.fields?.issueDate ?? i.createdAt)}</span>
                   <span className="num col-start-3 row-start-1 justify-self-end font-semibold md:col-start-6">{fmtMoney(i.fields?.total, i.fields?.currency)}</span>
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+              const rowClass = `${cols} -mx-2 min-h-14 w-[calc(100%+1rem)] items-center rounded-xl px-2 py-2 text-start transition-colors hover:bg-ground`;
+              return (
+                <li key={i.id} className={rowCls}>
+                  {selecting
+                    ? <button type="button" disabled={!removable(i)} aria-pressed={on} onClick={() => toggle(i.id)} className={`${rowClass} ${on ? 'bg-alert-tint hover:bg-alert-tint' : ''} disabled:cursor-not-allowed`}>{rowBody}</button>
+                    : <Link to={`/items/${i.id}`} className={rowClass}>{rowBody}</Link>}
+                </li>
+              );
+            })}
           </ul>
         )}
+        {selecting && (
+          <div className="sticky bottom-24 z-10 mt-3 flex flex-wrap items-center gap-3 rounded-2xl bg-white p-3 shadow-soft md:bottom-4">
+            <span className="text-sm font-semibold">{t('remove.selected', { n: picked.size })}</span>
+            <label className="flex min-h-10 items-center gap-2 text-sm">
+              <input type="checkbox" className="size-5" checked={ignoreVendors} onChange={(e) => setIgnoreVendors(e.target.checked)} />
+              {t('remove.ignoreVendors')}
+            </label>
+            <Button variant="danger" className="ms-auto" disabled={picked.size === 0 || removing.busy} loading={removing.busy} onClick={removePicked}>
+              <Icon name="trash" />{t('remove.selectedButton', { n: picked.size })}
+            </Button>
+          </div>
+        )}
+        <ErrorText>{removing.error}</ErrorText>
         <div className="mt-3 flex items-center justify-between text-sm">
           <Button variant="secondary" disabled={page === 0} onClick={() => set({ page: String(page - 1) })}>{t('common.prev')}</Button>
           <span className="text-muted">{t('common.page', { n: page + 1 })}</span>

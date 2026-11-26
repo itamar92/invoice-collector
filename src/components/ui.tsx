@@ -95,7 +95,21 @@ export function usageText(u: AiUsageTotals | null | undefined): string {
 }
 export const stateLabel = (s: string) => tDyn(`state.${s}`, 'common.none');
 export const reasonLabel = (r: string | null) => (r ? tDyn(`reason.${r}`, 'error.generic') : '');
-export const itemTitle = (i: Item) => i.fields?.vendorName || i.attachmentName || t('item.title');
+/**
+ * A document's name: the supplier, else the attachment's own name, else (nothing was read, e.g. the email's link
+ * did not lead to a PDF) who sent the email, so the owner can tell which email it was.
+ */
+export const itemTitle = (i: Item) => i.fields?.vendorName
+  || (i.attachmentName && i.attachmentName !== 'link.pdf' ? i.attachmentName : null)
+  || i.email?.sender?.trim() || t('item.title');
+
+/** One line under a document's name telling which email it came from: subject (or sender) and arrival. */
+export function EmailLine({ item }: { item: Item }) {
+  const e = item.email;
+  if (!e || item.fields?.vendorName) return null;
+  const subject = (e.subject ?? '').replace(/\s+/g, ' ').trim();
+  return <span className="block truncate text-[12px] text-muted" title={subject}><bdi>{subject || e.sender}</bdi></span>;
+}
 
 // ---------- primitives ----------
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -140,6 +154,8 @@ const ICONS = {
   folder: <path d="M3.5 6a1 1 0 0 1 1-1h3.6l1.6 1.8h5.8a1 1 0 0 1 1 1V14.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />,
   camera: <><path d="M3.5 7.5a1 1 0 0 1 1-1h2l1.2-2h4.6l1.2 2h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /><circle cx="10" cy="10.8" r="2.6" /></>,
   share: <><path d="M10 3v9M6.5 6.5 10 3l3.5 3.5" /><path d="M7 9H5.5a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H13" /></>,
+  bell: <><path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.5 2h-12z" /><path d="M8.5 17.5a1.6 1.6 0 0 0 3 0" /></>,
+  trash: <><path d="M4 6h12M8 6V4.5h4V6" /><path d="M5.5 6l.8 10a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.8-10" /></>,
   addHome: <><rect x="3.5" y="3.5" width="13" height="13" rx="3" /><path d="M10 7v6M7 10h6" /></>,
 } as const;
 export type IconName = keyof typeof ICONS;

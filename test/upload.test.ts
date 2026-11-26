@@ -43,7 +43,7 @@ function fakeAi(calls: AiRequest[] = []): AiProvider {
 }
 const deps = (ai: AiProvider | null): Deps => ({
   storage: { exists: async () => ({ exists: false, sameContent: false }), put: async (f, n) => ({ path: `${f}/${n}`, existed: false }) },
-  accounting: null, ai, settings: getSettings(), now: () => NOW,
+  accounting: null, ai, settings: { ...getSettings(), autoApproveVendors: false }, now: () => NOW,
 });
 
 async function boot(over: Partial<ApiContext> = {}) {
