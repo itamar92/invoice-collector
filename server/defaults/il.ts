@@ -42,7 +42,7 @@ export const IL_DEFAULTS: Settings = {
   currency: 'ILS',
   currencyLabel: 'שח',
   vatRate: 18,
-  gmailLabel: null,
+  gmailLabels: [],
   gmailScopes: [],
   storageProvider: 'dropbox', // installs from before Google Drive support were all Dropbox
   storageRoot: '',

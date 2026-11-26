@@ -385,9 +385,9 @@ test('summary: attention includes open ingest failures; lastTickError is sanitiz
 
 test('settings PUT updates editable fields only; invalid -> 400', async () => {
   const { call } = await boot();
-  const ok = await call('PUT', '/api/settings', { gmailLabel: 'חשבוניות', pollMinutes: 30 });
+  const ok = await call('PUT', '/api/settings', { gmailLabels: ['חשבוניות', ' קבלות ', 'חשבוניות'], pollMinutes: 30 });
   assert.equal(ok.status, 200);
-  assert.equal(getSettings().gmailLabel, 'חשבוניות');
+  assert.deepEqual(getSettings().gmailLabels, ['חשבוניות', 'קבלות']); // trimmed, duplicates dropped
   assert.equal((await call('PUT', '/api/settings', { backfillDone: true })).status, 400);
   assert.equal((await call('PUT', '/api/settings', { pollMinutes: 0 })).status, 400);
   assert.equal((await call('PUT', '/api/settings', { timezone: 'Mars/Base' })).status, 400);

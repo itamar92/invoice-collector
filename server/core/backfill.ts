@@ -29,7 +29,7 @@ export async function startBackfill(gmail: GmailSource, deps: Deps): Promise<{ e
   const year = deps.now().getUTCFullYear();
   updateSettings({ backfillStartedAt: deps.now().toISOString(), backfillDone: false });
   const ids = await gmail.listCandidateMessages({
-    after: `${year}/01/01`, labelled: getSettings().gmailLabel != null,
+    after: `${year}/01/01`, labelled: getSettings().gmailLabels.length > 0,
   });
   let emails = 0;
   let items = 0;

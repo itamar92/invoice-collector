@@ -60,7 +60,7 @@ updateSettings({
   setupComplete: true,
   backfillDone: false,
   backfillStartedAt: daysAgo(1),
-  gmailLabel: 'חשבוניות',
+  gmailLabels: ['חשבוניות'],
   storageRoot: '/חשבוניות',
   morning: { mode: 'api_file' }, // Morning id/secret left unset -> the "disconnected" banner shows
   ai: { mode: 'none' },

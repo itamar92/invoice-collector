@@ -63,7 +63,7 @@ export function startWorker(getDeps: () => WorkerContext, opts: WorkerOptions = 
         // The query is bounded by date, excludes the done label, and is paged; known ids are skipped by
         // ingestMessage without a fetch.
         const after = yearStart.replaceAll('-', '/');
-        const ids = await gmail.listCandidateMessages({ after, labelled: settings.gmailLabel != null });
+        const ids = await gmail.listCandidateMessages({ after, labelled: settings.gmailLabels.length > 0 });
         for (const id of ids) {
           try { await ingestMessage(gmail, id, 'ongoing'); } catch (e) { recordIngestFailure(id, 'ongoing', e); }
         }

@@ -214,7 +214,7 @@ export const api = {
   pdfUrl: (id: string) => `/api/items/${enc(id)}/pdf`,
   saveFields: (id: string, patch: Partial<ExtractedFields>) =>
     send<{ item: Item; valid: boolean; problems: Reason[] }>('PUT', `/api/items/${enc(id)}/fields`, patch),
-  retry: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/retry`),
+  retry: (id: string) => send<Item & { refetched?: number }>('POST', `/api/items/${enc(id)}/retry`),
   dismiss: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/dismiss`),
   /** Deletes the filed copy from the cloud, takes back the Morning draft when possible, and dismisses. */
   remove: (id: string, ignoreVendor = false) => send<RemoveResult>('POST', `/api/items/${enc(id)}/remove`, { ignoreVendor }),

@@ -284,6 +284,22 @@ async function fetchSafe(
   }
 }
 
+/** GETs a vendor's JSON API with the same SSRF checks as downloadPdf; throws LinkError('link_not_pdf') if not JSON. */
+export async function fetchJson(url: string, opts: DownloadOptions = {}): Promise<unknown> {
+  let start: URL;
+  try {
+    start = new URL(url);
+  } catch {
+    throw new LinkError('link_blocked', 'invalid url');
+  }
+  const got = await fetchSafe(start, opts, new Map(), AbortSignal.timeout(opts.timeoutMs ?? 30_000));
+  try {
+    return JSON.parse(got.body.toString('utf8'));
+  } catch {
+    throw new LinkError('link_not_pdf', 'response is not JSON');
+  }
+}
+
 /**
  * Downloads a PDF from an emailed link, refusing internal addresses (SSRF). When the link opens an HTML page
  * (a "download your invoice" landing page, a viewer, a script redirect), the page is searched for the PDF

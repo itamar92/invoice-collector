@@ -23,7 +23,7 @@ export default function Missed() {
     <div className="space-y-4">
       <PageTitle>{t('missed.title')}</PageTitle>
       <p className="text-sm text-muted">{t('missed.intro')}</p>
-      {!settings!.settings.gmailLabel && <Notice tone="warn">{t('missed.noLabel')}</Notice>}
+      {settings!.settings.gmailLabels.length === 0 && <Notice tone="warn">{t('missed.noLabel')}</Notice>}
       <Card actions={
         <label className="flex min-h-8 items-center gap-2 text-sm font-semibold">
           <input type="checkbox" className="size-5" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> {t('missed.showAll')}

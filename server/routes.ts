@@ -39,6 +39,7 @@ import type { SecretKey } from './secrets.js';
 import { getSettings, updateSettings } from './settings.js';
 import type { Settings } from './settings.js';
 import type { GmailSource } from './sources/gmail.js';
+import { REFETCH_REASONS, refetchItem } from './sources/gmail.js';
 import { relayClient, relayConfig, RelayError, type RelayClient } from './sources/relayClient.js';
 import { telegramBotInfo } from './sources/telegram.js';
 import { createUpload, MAX_UPLOAD_BYTES, runUpload, UploadError } from './sources/upload.js';
@@ -141,7 +142,7 @@ const SettingsPatch = z.object({
   currency: z.string().min(1),
   currencyLabel: z.string().min(1),
   vatRate: z.number().min(0).max(100),
-  gmailLabel: z.string().min(1).nullable(),
+  gmailLabels: z.array(z.string().trim().min(1)).max(20).transform((a) => [...new Set(a)]),
   storageProvider: z.enum(['dropbox', 'gdrive']),
   storageRoot: z.string(),
   folderTemplate: z.string().min(1),
@@ -344,10 +345,21 @@ export function apiRouter(ctx: ApiContext): express.Router {
     res.json({ item: after, valid: check.ok, problems: check.ok ? [] : check.problems });
   }));
 
-  r.post('/items/:id/retry', wrap((req, res) => {
+  r.post('/items/:id/retry', wrap(async (req, res) => {
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
     if (item.state !== 'needs_attention') throw new HttpError(409, 'item_not_retryable');
+    // No document yet (its link failed, or none was found): queueing it again would only fail on "no pdf", so the
+    // email is read again with the current code instead.
+    if (item.reason && REFETCH_REASONS.includes(item.reason) && !getItemPdf(item.id)) {
+      const { gmail } = live();
+      let r: Awaited<ReturnType<typeof refetchItem>>;
+      try { r = await refetchItem(gmail, item.id); } catch {
+        throw new HttpError(502, 'gmail_unavailable');
+      }
+      res.json({ ...getItem(item.id), refetched: r.found });
+      return;
+    }
     const to: ItemState = item.reason === 'storage_error' ? 'ready'
       : item.reason === 'accounting_error' ? 'stored' : 'queued';
     getDb().transaction(() => { // fresh retry budget, as the pipeline does on every state change
