@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { AppNotification } from '../api.js';
@@ -81,6 +81,28 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
   const [list, setList] = useState<AppNotification[] | null>(null);
   const push = usePush();
   const box = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  // The panel is fixed to the viewport and clamped inside it (16px gutters), so on a phone it never runs off the
+  // screen whichever side of the header the bell sits on. It hangs from the bell's 'start' or 'end' edge when it fits.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (!r) return;
+      const vw = document.documentElement.clientWidth;
+      const width = Math.min(352, vw - 32);
+      const rtl = getComputedStyle(btn.current!).direction === 'rtl';
+      const fromRight = (align === 'end') !== rtl; // end in LTR / start in RTL: right edges line up
+      const want = fromRight ? r.right - width : r.left;
+      setPos({ top: r.bottom + 8, left: Math.max(16, Math.min(want, vw - 16 - width)), width });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, align]);
 
   useEffect(() => {
     let stop = false;
@@ -111,14 +133,15 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
 
   return (
     <div ref={box} className="relative">
-      <button type="button" aria-label={t('notif.title')} title={t('notif.title')} aria-expanded={open} onClick={() => setOpen(!open)}
+      <button ref={btn} type="button" aria-label={t('notif.title')} title={t('notif.title')} aria-expanded={open} onClick={() => setOpen(!open)}
         className="relative grid size-10 place-items-center rounded-xl bg-white text-ink shadow-soft hover:bg-ground-deep">
         <Icon name="bell" />
         {unread > 0 && <span className="absolute -top-1.5 -end-1.5"><CountBadge n={unread} tone="red" /></span>}
       </button>
       {open && (
         <div role="dialog" aria-label={t('notif.title')}
-          className={`z-40 rounded-2xl bg-white p-2 shadow-soft ring-1 ring-line max-md:fixed max-md:inset-x-4 max-md:top-16 md:absolute md:top-12 md:w-[22rem] ${align === 'end' ? 'md:end-0' : 'md:start-0'}`}>
+          style={pos ? { top: pos.top, left: pos.left, width: pos.width } : { visibility: 'hidden' }}
+          className="fixed z-40 rounded-2xl bg-white p-2 shadow-soft ring-1 ring-line">
           <div className="flex items-center justify-between gap-2 px-2 py-1">
             <span className="font-semibold">{t('notif.title')}</span>
             <span className="flex items-center gap-3">
@@ -127,7 +150,7 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
             </span>
           </div>
           {!list?.length ? <p className="px-2 py-4 text-sm text-muted">{t('notif.empty')}</p> : (
-            <ul className="max-h-[60dvh] overflow-y-auto">
+            <ul className="max-h-[min(60dvh,calc(100dvh-12rem))] overflow-y-auto">
               {list.map((n) => {
                 const d = describe(n);
                 return (
