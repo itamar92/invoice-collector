@@ -31,6 +31,7 @@ function usePush() {
   const [state, setState] = useState<PushState>('off');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
   useEffect(() => {
@@ -46,7 +47,7 @@ function usePush() {
   }, []);
 
   const run = async (fn: () => Promise<void>) => {
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setInfo(null);
     try { await fn(); } catch (e) { setError((e as Error).message || t('notif.pushFailed')); } finally { setBusy(false); }
   };
   const enable = () => run(async () => {
@@ -66,13 +67,15 @@ function usePush() {
   });
   const test = () => run(async () => {
     const r = await api.pushTest();
-    if (r.sent === 0) throw new Error(t('notif.pushFailed'));
+    if (r.devices === 0) throw new Error(t('notif.noDevices'));
+    if (r.sent === 0) throw new Error(r.errors.length ? t('notif.testFailed', { error: r.errors.join(' · ') }) : t('notif.pushFailed'));
+    setInfo(t('notif.testSent', { n: r.sent }));
   });
-  return { state, busy, error, enable, disable, test };
+  return { state, busy, error, info, enable, disable, test };
 }
 
 export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' }) {
-  const { summary } = useApp();
+  const { summary, refreshSummary } = useApp();
   const unread = summary?.notificationsUnread ?? 0;
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<AppNotification[] | null>(null);
@@ -120,6 +123,13 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
   const markAll = async () => {
     try { await api.readNotifications(); setList((l) => l?.map((n) => ({ ...n, read: true })) ?? l); } catch { /* retried next open */ }
   };
+  const clear = async (ids?: number[]) => {
+    try {
+      await api.clearNotifications(ids);
+      setList((l) => (ids ? l?.filter((n) => !ids.includes(n.id)) ?? l : []));
+      void refreshSummary();
+    } catch { /* the list stays as it was */ }
+  };
 
   return (
     <div ref={box} className="relative">
@@ -134,16 +144,19 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
           className="fixed z-40 rounded-2xl bg-white p-2 shadow-soft ring-1 ring-line">
           <div className="flex items-center justify-between gap-2 px-2 py-1">
             <span className="font-semibold">{t('notif.title')}</span>
-            {unread > 0 && <button type="button" onClick={() => void markAll()} className="min-h-8 text-xs font-semibold text-accent underline">{t('notif.markAll')}</button>}
+            <span className="flex items-center gap-3">
+              {unread > 0 && <button type="button" onClick={() => void markAll()} className="min-h-8 text-xs font-semibold text-accent underline">{t('notif.markAll')}</button>}
+              {!!list?.length && <button type="button" onClick={() => void clear()} className="min-h-8 text-xs font-semibold text-muted underline">{t('notif.clearAll')}</button>}
+            </span>
           </div>
           {!list?.length ? <p className="px-2 py-4 text-sm text-muted">{t('notif.empty')}</p> : (
             <ul className="max-h-[min(60dvh,calc(100dvh-12rem))] overflow-y-auto">
               {list.map((n) => {
                 const d = describe(n);
                 return (
-                  <li key={n.id}>
+                  <li key={n.id} className="group flex items-start">
                     <Link to={n.itemId ? `/items/${n.itemId}` : '/invoices'} onClick={() => { setOpen(false); if (!n.read) void api.readNotifications([n.id]).catch(() => {}); }}
-                      className={`flex gap-2 rounded-xl px-2 py-2 hover:bg-ground ${n.read ? '' : 'bg-accent-tint/60'}`}>
+                      className={`flex min-w-0 flex-1 gap-2 rounded-xl px-2 py-2 hover:bg-ground ${n.read ? '' : 'bg-accent-tint/60'}`}>
                       <span className={`mt-1.5 size-2 shrink-0 rounded-full ${n.read ? 'bg-transparent' : 'bg-accent'}`} />
                       <span className="min-w-0">
                         <span className="block text-xs text-muted">{t('notif.processed')} · <span className="num">{fmtDateTime(n.at)}</span></span>
@@ -151,6 +164,10 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
                         <span className="block text-xs text-muted">{d.body}</span>
                       </span>
                     </Link>
+                    <button type="button" aria-label={`${t('notif.remove')}: ${d.title}`} title={t('notif.remove')} onClick={() => void clear([n.id])}
+                      className="grid size-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-ground hover:text-ink">
+                      <Icon name="close" className="size-4" />
+                    </button>
                   </li>
                 );
               })}
@@ -168,7 +185,8 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
             {push.state === 'denied' && <p className="text-muted">{t('notif.blocked')}</p>}
             {push.state === 'needs_install' && <p className="text-muted">{t('notif.installFirst')}</p>}
             {push.state === 'unsupported' && <p className="text-muted">{t('notif.unsupported')}</p>}
-            {push.error && <p className="text-alert-deep">{push.error}</p>}
+            {push.info && <p className="text-accent-deep">{push.info}</p>}
+            {push.error && <p className="text-alert-deep [overflow-wrap:anywhere]">{push.error}</p>}
           </div>
         </div>
       )}

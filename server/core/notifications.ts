@@ -75,3 +75,11 @@ export function markNotificationsRead(ids?: number[]): number {
   return db.prepare(`UPDATE notifications SET read = 1 WHERE read = 0 AND id IN (${ids.map(() => '?').join(',')})`)
     .run(...ids).changes;
 }
+
+/** Removes these (or, with no ids, all) notifications from the bell. Returns how many were removed. */
+export function clearNotifications(ids?: number[]): number {
+  const db = getDb();
+  if (!ids) return db.prepare('DELETE FROM notifications').run().changes;
+  if (ids.length === 0) return 0;
+  return db.prepare(`DELETE FROM notifications WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids).changes;
+}

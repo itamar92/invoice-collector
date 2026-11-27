@@ -18,17 +18,25 @@ export default function Missed() {
     if (what === 'queue') await api.queueMissed(r.messageId); else await api.hideMissed(r.messageId);
     await list.reload(); await refreshSummary();
   }, `${what}:${r.messageId}`);
+  const open = (list.data ?? []).filter((r) => r.status === 'open').length;
+  const clearAll = () => {
+    if (!window.confirm(t('missed.clearAllConfirm', { n: open }))) return;
+    void act.run(async () => { await api.hideAllMissed(); await list.reload(); await refreshSummary(); }, 'hide-all');
+  };
 
   return (
     <div className="space-y-4">
       <PageTitle>{t('missed.title')}</PageTitle>
       <p className="text-sm text-muted">{t('missed.intro')}</p>
       {settings!.settings.gmailLabels.length === 0 && <Notice tone="warn">{t('missed.noLabel')}</Notice>}
-      <Card actions={
+      <Card actions={<>
+        {open > 0 && (
+          <Button variant="secondary" loading={act.is('hide-all')} disabled={act.busy} onClick={clearAll}>{t('missed.clearAll')}</Button>
+        )}
         <label className="flex min-h-8 items-center gap-2 text-sm font-semibold">
           <input type="checkbox" className="size-5" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} /> {t('missed.showAll')}
         </label>
-      }>
+      </>}>
         <ErrorText>{act.error}</ErrorText>
         {list.loading && !list.data ? <Loading rows={4} /> : list.error ? <ErrorText>{list.error}</ErrorText> : rows.length === 0 ? <Empty /> : (
           <ul>

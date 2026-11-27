@@ -54,11 +54,13 @@
   a { text-underline-offset: 3px; }
 }
 
-/* Chart series: eight fixed category colours, assigned in order and never cycled. A ninth category folds into "other". */
+/* Chart series: sixteen category colours, assigned in order; every category is shown on its own (past 16 they repeat). */
 :root {
   --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a; --cat-4: #eda100;
   --cat-5: #e87ba4; --cat-6: #008300; --cat-7: #6250d6; --cat-8: #e34948;
-  --cat-other: #8b8089; --cat-none: #c9c0c8;
+  --cat-9: #0e9fb0; --cat-10: #a0522d; --cat-11: #9c3fb5; --cat-12: #7a8f00;
+  --cat-13: #1f4e9c; --cat-14: #c2185b; --cat-15: #5d7a6e; --cat-16: #b8860b;
+  --cat-none: #c9c0c8;
 }
 
 /* Paths, filenames, JSON, emails stay left-to-right inside the RTL page. */
