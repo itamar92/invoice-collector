@@ -431,6 +431,33 @@ async function account(item: Item, deps: Deps): Promise<void> {
 
   const pdf = getItemPdf(item.id);
   if (!pdf || !item.storagePath) return moveTo(item.id, 'needs_attention', 'accounting_error', 'no pdf or storage path');
+
+  // Already in Morning (entered by hand, forwarded by email, sent by another tool)? Record it instead of sending a
+  // duplicate. A "maybe" (two of number/amount/supplier) is still sent, with a note. Morning unreachable: retry later.
+  let maybeNote: string | null = null;
+  if (deps.accounting.findExisting) {
+    try {
+      const m = await deps.accounting.findExisting(fields);
+      if (m?.status === 'found') {
+        const moved = getDb().transaction(() => {
+          if (m.morningId) updateItem(item.id, { accountingRef: `${m.where ?? 'expense'}:${m.morningId}`, accountingMode: 'existing' });
+          const ok = moveIf(item.id, 'stored', 'done', `already_in_accounting:${m.where ?? 'expense'}${m.morningId ? `:${m.morningId}` : ''}`);
+          if (ok && item.recipeFailed) noteItem(item.id, 'recipe_rewritten');
+          return ok;
+        })();
+        if (moved) notifyProcessed(item.id, true, deps.now());
+        return;
+      }
+      if (m?.status === 'maybe') maybeNote = `accounting_maybe_exists:${m.where ?? 'expense'}${m.morningId ? `:${m.morningId}` : ''}`;
+    } catch (e) {
+      if (isDbError(e)) throw e;
+      if (e instanceof TransientError) return retryLater(item, deps, 'accounting_error', `check before send: ${e.message}`);
+      // The search itself was refused (not the send): look-up is a safeguard, so the send goes ahead, noted.
+      noteItem(item.id, `accounting_check_failed: ${message(e)}`.slice(0, 300));
+    }
+  }
+  if (maybeNote) noteItem(item.id, maybeNote);
+
   // R16: a previous attempt (transient failure, or a crash mid-send) may have reached the destination.
   const retry = item.attempts > 0 || hasSendAttempt(item.id);
   noteItem(item.id, SEND_ATTEMPT);

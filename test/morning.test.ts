@@ -322,3 +322,18 @@ test('remove: finds the draft by its uploaded file key and deletes it; never an 
   assert.deepEqual(await m3.remove({ ref: 'msg-1', mode: 'email', fields }), { outcome: 'manual', reason: 'sent_by_email' });
   assert.equal(none.calls.length, 0);
 });
+
+test('findExisting: no API keys → null (cannot look); with keys an equal expense is found, read-only', async () => {
+  openDb(':memory:');
+  const f = fakeFetch((c) => isOauth(c) ? json(200, { accessToken: 't', expiresAt: NOW.getTime() / 1000 + 3600 })
+    : path(c).endsWith('/expenses/search') ? json(200, { items: [{ id: 'e-5', status: 10, number: 'INV-7', amount: 118, supplier: { name: 'Acme' } }] })
+    : path(c).endsWith('/expenses/drafts/search') ? json(200, { items: [] }) : json(404, {}));
+  const m = new MorningAccounting({ fetchImpl: f.impl, getSettings: settings('api_file'), now: () => NOW });
+  assert.equal(await m.findExisting(fields), null);
+  assert.equal(f.calls.length, 0);
+  setSecret('morning_id', 'id'); setSecret('morning_secret', 's');
+  const r = await m.findExisting(fields);
+  assert.equal(r?.status, 'found');
+  assert.equal(r?.morningId, 'e-5');
+  assert.ok(f.calls.every((c) => c.init.method === 'POST' && /(oauth\/token|search)$/.test(path(c))));
+});

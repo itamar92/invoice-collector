@@ -71,6 +71,18 @@ export interface MorningMatch {
 }
 export type CatchupCheck = MorningMatch & { id: string; error?: string };
 export interface CatchupSent { id: string; outcome: 'sent' | 'in_morning' | 'failed'; error?: string; match?: MorningMatch }
+/** A Morning expense draft waiting for the owner's approval, as Morning's OCR read it. */
+export interface PendingDraft {
+  id: string; createdAt: string | null; number: string | null; date: string | null; reportingDate: string | null;
+  amount: number | null; vat: number | null; currency: string | null; supplierName: string | null; supplierTaxId: string | null;
+  documentType: number | null; paymentType: number | null; classification: string | null; fileUrl: string | null; fileKey: string | null;
+}
+export interface DraftRow {
+  draft: PendingDraft;
+  item: null | { id: string; fields: ExtractedFields; filename: string | null; classificationId: string | null };
+  match: 'ref' | 'found' | 'maybe' | null;
+}
+export interface ApproveResult { expenseId: string; existed: boolean; fileAttached: boolean; draftRemoved: boolean; draftReason?: string }
 export type ItemSort = 'vendor' | 'category' | 'state' | 'date' | 'total';
 export interface Vendor { key: string; displayName: string; status: VendorStatus; defaultCategory: string | null; createdAt: string }
 export interface RecipeVersion { version: number; source: 'starter' | 'ai' | 'user' | 'shared'; createdAt: string; recipe: Record<string, unknown> & { aiAlways?: boolean } }
@@ -233,6 +245,9 @@ export const api = {
   catchupSend: (ids: string[]) => send<{ results: CatchupSent[] }>('POST', '/api/morning/catchup/send', { ids }),
   catchupMark: (ids: string[], as: 'in_morning' | 'skipped', refs?: Record<string, { where: 'expense' | 'draft'; morningId: string }>) =>
     send<{ changed: number }>('POST', '/api/morning/catchup/mark', { ids, as, refs }),
+  morningDrafts: () => get<{ configured: boolean; rows: DraftRow[] }>('/api/morning/drafts'),
+  approveDraft: (draftId: string, itemId: string) =>
+    send<{ result: ApproveResult }>('POST', `/api/morning/drafts/${enc(draftId)}/approve`, { itemId }),
   restore: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/restore`),
   /** A receipt set aside because its tax invoice is on file: file it anyway. */
   keepReceipt: (id: string) => send<Item>('POST', `/api/items/${enc(id)}/keep-receipt`),

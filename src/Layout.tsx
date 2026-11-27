@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
   { to: '/vendors', key: 'nav.vendors', icon: 'vendor' },
   { to: '/backfill', key: 'nav.backfill', icon: 'import' },
   { to: '/morning', key: 'nav.morning', icon: 'send' },
+  { to: '/morning-drafts', key: 'nav.morningDrafts', icon: 'check' },
   { to: '/settings', key: 'nav.settings', icon: 'settings' },
 ];
 /** Phone: the first four are tabs; the rest live behind the menu tab. */

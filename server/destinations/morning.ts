@@ -174,12 +174,23 @@ export class MorningAccounting implements AccountingDestination {
   private readonly mailer?: Mailer;
   private readonly getSettings: () => Settings;
   private readonly now: () => Date;
+  private readonly lookup: MorningLookup;
 
   constructor(opts: MorningOptions = {}) {
     this.now = opts.now ?? (() => new Date());
     this.client = makeClient(opts, this.now);
     this.mailer = opts.mailer;
     this.getSettings = opts.getSettings ?? defaultGetSettings;
+    this.lookup = new MorningLookup({ ...opts, now: this.now });
+  }
+
+  /**
+   * Before a send: is this document already an expense or a pending draft in Morning? Read-only, needs API keys
+   * (email mode without keys cannot look: null). Matching rules: compare() (same number + amount + supplier = found).
+   */
+  async findExisting(fields: ExtractedFields): Promise<MorningMatch | null> {
+    if (!getSecret('morning_id') || !getSecret('morning_secret')) return null;
+    return this.lookup.find(fields);
   }
 
   async send(item: { pdf: Buffer; filename: string; fields: ExtractedFields; category: Category; retry?: boolean }):
@@ -439,4 +450,193 @@ export async function fetchMorningClassifications(opts: HostOptions = {}):
   };
   walk(await client.get('/accounting/classifications/map'), 0);
   return [...out.values()].sort((a, b) => a.title.localeCompare(b.title, 'he'));
+}
+
+/** A Morning expense draft still waiting for the owner's approval (status 10 "new"). */
+export interface PendingDraft {
+  id: string;
+  /** Unix seconds as Morning gives it, as ISO. */
+  createdAt: string | null;
+  number: string | null;
+  date: string | null;
+  reportingDate: string | null;
+  amount: number | null;
+  vat: number | null;
+  currency: string | null;
+  supplierName: string | null;
+  supplierTaxId: string | null;
+  documentType: number | null;
+  paymentType: number | null;
+  classification: string | null;
+  /** Download link of the uploaded file. */
+  fileUrl: string | null;
+  /** Community-schema field (not in the v2 spec); used to tie a draft to our upload when present. */
+  fileKey: string | null;
+}
+
+/** Our document type as Morning's expense documentType code (official v2 spec). */
+export const MORNING_DOC_TYPE: Record<string, number> = {
+  tax_invoice: 305, tax_invoice_receipt: 320, credit_note: 330, receipt: 400, other: 20,
+};
+
+const PENDING_DRAFT = 10;
+
+function toPending(d: any): PendingDraft | null {
+  if (!d || d.id == null || d.status !== PENDING_DRAFT) return null;
+  const e = d.expense ?? {};
+  const s = e.supplier ?? {};
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : typeof v === 'number' ? String(v) : null);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const ts = typeof d.creationDate === 'number' ? new Date(d.creationDate * (d.creationDate > 1e12 ? 1 : 1000)).toISOString() : null;
+  return {
+    id: String(d.id), createdAt: ts,
+    number: str(e.number), date: str(e.date)?.slice(0, 10) ?? null, reportingDate: str(e.reportingDate)?.slice(0, 10) ?? null,
+    amount: num(e.amount), vat: num(e.vat), currency: str(e.currency),
+    supplierName: str(s.name), supplierTaxId: str(s.taxId),
+    documentType: num(e.documentType), paymentType: num(e.paymentType),
+    classification: str(e.accountingClassification?.title),
+    fileUrl: typeof d.url === 'string' && /^https:\/\//.test(d.url) ? d.url : null,
+    fileKey: str(e.fileKey),
+  };
+}
+
+export interface ApproveInput {
+  draft: PendingDraft;
+  fields: ExtractedFields;
+  /** Morning accounting classification id (the category's mapping in Settings). */
+  classificationId: string;
+  pdf: Buffer | null;
+  filename: string;
+}
+
+export interface ApproveResult {
+  expenseId: string;
+  /** An expense with this number, amount and supplier was already in Morning: nothing was created. */
+  existed: boolean;
+  /** We attached our PDF to the expense now. */
+  fileAttached: boolean;
+  draftRemoved: boolean;
+  /** Why the draft was left in Morning (the owner removes it there). */
+  draftReason?: string;
+}
+
+/** Why approving cannot start: a required Morning field is missing on both sides. */
+export class ApproveBlocked extends Error {
+  constructor(public readonly code: 'no_number' | 'no_date' | 'no_supplier' | 'no_amount' | 'future_date') { super(code); }
+}
+
+/**
+ * The owner's approval queue in Morning: expense drafts (uploads, ours and anyone else's) waiting to be approved.
+ *
+ * Morning has no "approve draft" endpoint (official v2 spec, 2026-11). Approving with our details therefore means,
+ * only on the owner's explicit click for one draft:
+ *   1. POST /expenses/search by number: if the same expense is already there, nothing is created.
+ *   2. POST /expenses with our fields and the category's classification (this creates an approved expense).
+ *   3. Our PDF is attached to it: GET /file-upload/v1/url with data {id, source:5, state:"expense"} + S3 upload.
+ *   4. DELETE /expenses/drafts/{id} (undocumented; a refusal leaves the draft for the owner to delete in Morning).
+ * The draft is deleted only when the new expense holds the file, so a file is never lost.
+ */
+export class MorningDrafts {
+  private readonly client: Client;
+  private readonly now: () => Date;
+
+  constructor(opts: HostOptions & { now?: () => Date } = {}) {
+    this.now = opts.now ?? (() => new Date());
+    this.client = makeClient(opts, this.now);
+  }
+
+  async listPending(): Promise<PendingDraft[]> {
+    const from = ymd(new Date(this.now().getTime() - DRAFT_LOOKUP_DAYS * 86_400_000));
+    const out: PendingDraft[] = [];
+    for (let page = 1; page <= DRAFT_PAGES; page++) {
+      const r = await this.client.post('/expenses/drafts/search', { fromDate: from, page, pageSize: 100 });
+      const got: any[] = Array.isArray(r?.items) ? r.items : [];
+      for (const d of got) { const p = toPending(d); if (p) out.push(p); }
+      if (got.length < 100 || (typeof r?.pages === 'number' && page >= r.pages)) break;
+    }
+    return out.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }
+
+  /** The body POST /expenses gets: our fields first, Morning's reading of the draft where ours are missing. */
+  expenseBody(input: Omit<ApproveInput, 'pdf' | 'filename'>): Record<string, unknown> {
+    const { draft: d, fields: f } = input;
+    const number = f.docNumber ?? d.number;
+    const date = f.issueDate ?? d.date;
+    const supplier = f.vendorName ?? d.supplierName;
+    const amount = f.total ?? d.amount;
+    if (!number) throw new ApproveBlocked('no_number');
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApproveBlocked('no_date');
+    if (date > ymd(this.now())) throw new ApproveBlocked('future_date');
+    if (!supplier) throw new ApproveBlocked('no_supplier');
+    if (amount === null) throw new ApproveBlocked('no_amount');
+    // Morning proposes a VAT month (a late document lands in the open period); never earlier than the document's own.
+    const docMonth = `${date.slice(0, 7)}-01`;
+    const reportingDate = d.reportingDate && d.reportingDate.slice(0, 7) >= date.slice(0, 7) ? `${d.reportingDate.slice(0, 7)}-01` : docMonth;
+    const taxId = digits(f.vendorTaxId) || digits(d.supplierTaxId);
+    const body: Record<string, unknown> = {
+      documentType: (f.docType && MORNING_DOC_TYPE[f.docType]) || d.documentType || MORNING_DOC_TYPE.tax_invoice,
+      number, date, reportingDate,
+      currency: f.currency ?? d.currency ?? 'ILS',
+      amount,
+      supplier: { name: supplier, ...(taxId ? { taxId } : {}) },
+      accountingClassification: { id: input.classificationId },
+    };
+    const vat = f.vat ?? d.vat;
+    if (vat !== null && vat !== undefined) body.vat = vat;
+    if (d.paymentType !== null) body.paymentType = d.paymentType;
+    if (f.description) body.description = f.description.slice(0, 200);
+    if (f.allocationNumber) body.allocationNumber = f.allocationNumber;
+    return body;
+  }
+
+  async approve(input: ApproveInput): Promise<ApproveResult> {
+    const body = this.expenseBody(input);
+    const fields: ExtractedFields = {
+      ...input.fields, docNumber: String(body.number), total: body.amount as number,
+      vendorName: (body.supplier as any).name, vendorTaxId: (body.supplier as any).taxId ?? null, issueDate: String(body.date),
+    };
+    // 1. Already approved (an earlier click whose answer was lost, or entered by hand): never a second expense.
+    const found = await this.client.post('/expenses/search', { number: String(body.number), page: 1, pageSize: 50 });
+    const same = (Array.isArray(found?.items) ? found.items : [])
+      .find((e: any) => !DEAD_EXPENSE.has(e?.status) && compare(e, fields) === 'found');
+    let expenseId: string;
+    let existed = false;
+    let fileAttached = false;
+    let hadFile = false;
+    if (same?.id != null) {
+      expenseId = String(same.id);
+      existed = true;
+      hadFile = typeof same.url === 'string' && same.url !== '';
+    } else {
+      const created = await this.client.post('/expenses', body);
+      if (created?.id == null) throw new TransientError('Morning created the expense but returned no id');
+      expenseId = String(created.id);
+    }
+    // 2. Our PDF on the expense (an existing one only when it has no file yet). A failure keeps the draft, which
+    //    still holds the file.
+    let draftReason: string | undefined;
+    if (!hadFile && input.pdf) {
+      try {
+        const data = encodeURIComponent(JSON.stringify({ id: expenseId, source: 5, state: 'expense' }));
+        const p = await this.client.getUpload(`/file-upload/v1/url?context=expense&data=${data}`);
+        if (typeof p?.url !== 'string' || !/^https:\/\//.test(p.url) || !p.fields) throw new TransientError('Morning returned no upload URL');
+        await this.client.uploadPresigned(p as Presign, input.pdf, uploadName(input.filename));
+        fileAttached = true;
+      } catch (e) {
+        draftReason = `file_not_attached: ${(e as Error).message}`.slice(0, 200);
+      }
+    }
+    // 3. The draft goes only when the expense has a file of its own.
+    let draftRemoved = false;
+    if (hadFile || fileAttached) {
+      try {
+        const r = await this.client.del(`/expenses/drafts/${encodeURIComponent(input.draft.id)}`);
+        if (r.status >= 200 && r.status < 300) draftRemoved = true;
+        else draftReason = r.status === 404 || r.status === 405 ? 'delete_not_supported' : String(r.body?.errorMessage ?? `Morning ${r.status}`).slice(0, 200);
+      } catch (e) {
+        draftReason = (e as Error).message.slice(0, 200);
+      }
+    }
+    return { expenseId, existed, fileAttached, draftRemoved, ...(draftReason ? { draftReason } : {}) };
+  }
 }

@@ -84,6 +84,12 @@ export interface AccountingDestination {
    */
   remove?(sent: { ref: string; mode: string | null; fields: ExtractedFields | null }):
     Promise<{ outcome: 'removed' | 'manual'; reason?: string }>;
+  /**
+   * Looks the document up in the destination before it is sent. Null: no way to look (e.g. no API keys).
+   * found = the same document is already there (its id is recorded instead of sending); maybe = close, still sent.
+   * Throws TransientError when the destination cannot be reached (the pipeline retries later).
+   */
+  findExisting?(fields: ExtractedFields): Promise<{ status: 'found' | 'maybe' | 'not_found' | 'unknown'; where?: 'expense' | 'draft'; morningId?: string } | null>;
 }
 
 export interface Deps {
