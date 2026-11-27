@@ -223,7 +223,10 @@ export const api = {
   pushKey: () => get<{ publicKey: string }>('/api/push/key'),
   pushSubscribe: (sub: PushSubscriptionJSON) => send<{ ok: true }>('POST', '/api/push/subscribe', sub),
   pushUnsubscribe: (endpoint: string) => send<{ ok: true }>('POST', '/api/push/unsubscribe', { endpoint }),
-  pushTest: () => send<{ sent: number; failed: number }>('POST', '/api/push/test'),
+  pushTest: () => send<{ sent: number; failed: number; devices: number; errors: string[] }>('POST', '/api/push/test'),
+  clearNotifications: (ids?: number[]) => send<{ changed: number; unread: number }>('POST', '/api/notifications/clear', ids ? { ids } : {}),
+  /** "Worth a look" documents the owner checked: off that list (until the vendor's recipe fails on them again). */
+  worthReviewed: (ids?: string[]) => send<{ changed: number }>('POST', '/api/items/worth-reviewed', ids ? { ids } : {}),
   readNotifications: (ids?: number[]) => send<{ changed: number; unread: number }>('POST', '/api/notifications/read', ids ? { ids } : {}),
   catchup: () => get<{ rows: CatchupRow[]; mode: string | null; canCheck: boolean }>('/api/morning/catchup'),
   catchupCheck: (ids: string[]) => send<{ results: CatchupCheck[] }>('POST', '/api/morning/catchup/check', { ids }),
@@ -265,6 +268,7 @@ export const api = {
 
   missed: () => get<MissedRow[]>('/api/missed'),
   queueMissed: (id: string) => send<{ ok: true }>('POST', `/api/missed/${enc(id)}/queue`),
+  hideAllMissed: () => send<{ hidden: number }>('POST', '/api/missed/hide-all'),
   hideMissed: (id: string) => send<{ ok: true }>('POST', `/api/missed/${enc(id)}/hide`),
 
   settings: () => get<SettingsResponse>('/api/settings'),

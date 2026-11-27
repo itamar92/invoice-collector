@@ -156,6 +156,7 @@ const ICONS = {
   share: <><path d="M10 3v9M6.5 6.5 10 3l3.5 3.5" /><path d="M7 9H5.5a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H13" /></>,
   bell: <><path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.5 2h-12z" /><path d="M8.5 17.5a1.6 1.6 0 0 0 3 0" /></>,
   trash: <><path d="M4 6h12M8 6V4.5h4V6" /><path d="M5.5 6l.8 10a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.8-10" /></>,
+  refresh: <><path d="M16 10a6 6 0 1 1-1.76-4.24" /><path d="M16.2 3.8v3h-3" /></>,
   addHome: <><rect x="3.5" y="3.5" width="13" height="13" rx="3" /><path d="M10 7v6M7 10h6" /></>,
 } as const;
 export type IconName = keyof typeof ICONS;

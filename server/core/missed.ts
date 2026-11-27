@@ -67,6 +67,11 @@ export async function queueMissed(gmail: GmailSource, id: string, deps: Deps): P
   }
 }
 
+/** Hides every open row at once. Returns how many were hidden. */
+export function hideAllMissed(): number {
+  return getDb().prepare(`UPDATE missed SET status = 'hidden' WHERE status = 'open'`).run().changes;
+}
+
 export function hideMissed(id: string): void {
   getDb().prepare(`UPDATE missed SET status = 'hidden' WHERE message_id = ?`).run(id);
 }

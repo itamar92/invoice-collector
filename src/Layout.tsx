@@ -40,6 +40,9 @@ const NAV: NavItem[] = [
   { to: '/settings', key: 'nav.settings', icon: 'settings' },
 ];
 /** Phone: the first four are tabs; the rest live behind the menu tab. */
+/** "Run now": outlined in the accent so it reads as an action, not chrome; fills on hover. */
+const RUN_CLS = 'bg-white text-accent-deep shadow-soft ring-2 ring-inset ring-accent hover:bg-accent hover:text-white';
+
 const TABS = NAV.slice(0, 4);
 const MORE = NAV.slice(4);
 
@@ -136,8 +139,8 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </Link>
           <div className="flex shrink-0 items-center gap-2">
             <NotificationBell align="end" />
-            <Button variant="secondary" className="bg-white px-3 shadow-soft" loading={run.busy} onClick={runNow}>
-              {run.busy ? t('worker.running') : t('worker.runNow')}
+            <Button variant="secondary" className={`${RUN_CLS} px-3`} loading={run.busy} onClick={runNow}>
+              {!run.busy && <Icon name="refresh" />}{run.busy ? t('worker.running') : t('worker.runNow')}
             </Button>
             <Button className="w-11 px-0 shadow-soft" loading={upload.busy} onClick={upload.pick} aria-label={t('upload.button')} title={t('upload.button')}>
               {upload.busy ? <span className="ai-dots"><span /><span /><span /></span> : <Icon name="camera" />}
@@ -167,6 +170,10 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <Button className="mx-2 mt-4 shadow-soft" loading={upload.busy} onClick={upload.pick}>
           {!upload.busy && <Icon name="camera" />}{upload.busy ? t('upload.busyShort') : t('upload.button')}
         </Button>
+        <Button variant="secondary" className={`${RUN_CLS} mx-2 mt-2 min-h-11`} loading={run.busy} onClick={runNow}>
+          {!run.busy && <Icon name="refresh" />}{run.busy ? t('worker.running') : t('worker.runNow')}
+        </Button>
+        <p className="mx-2 mt-1.5 text-center text-xs text-muted">{lastRun}</p>
         {install.available && (
           <button type="button" onClick={() => void install.install()}
             className="mx-2 mt-2 flex min-h-10 items-center justify-center gap-1.5 rounded-xl text-sm font-semibold text-accent hover:bg-accent-tint">
@@ -174,11 +181,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </button>
         )}
         <div className="mt-auto space-y-2 px-2 text-xs text-muted">
-          <p>{lastRun}</p>
           {!active && <p>{t('worker.notActive')}</p>}
-          <Button variant="secondary" className="w-full bg-white shadow-soft" loading={run.busy} onClick={runNow}>
-            {run.busy ? t('worker.running') : t('worker.runNow')}
-          </Button>
           <button type="button" onClick={() => void logout()} className="min-h-8 font-medium text-ink underline">{t('logout')}</button>
         </div>
       </aside>

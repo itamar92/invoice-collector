@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import type { Item, Vendor, VendorStatus } from '../api.js';
@@ -72,12 +73,13 @@ export function VendorDecisions({ onDecided }: { onDecided?: () => void }) {
   );
 }
 
-export function ItemList({ items }: { items: Item[] }) {
+/** Documents, each opening its page; `action` adds a control at the row's end (outside the link). */
+export function ItemList({ items, action }: { items: Item[]; action?: (i: Item) => ReactNode }) {
   return (
     <ul>
       {items.map((i) => (
-        <li key={i.id} className={rowCls}>
-          <Link to={`/items/${i.id}`} className="-mx-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 rounded-xl px-2 py-2 transition-colors hover:bg-ground">
+        <li key={i.id} className={`${rowCls} ${action ? 'flex items-center gap-2' : ''}`}>
+          <Link to={`/items/${i.id}`} className={`-mx-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 rounded-xl px-2 py-2 transition-colors hover:bg-ground ${action ? 'min-w-0 flex-1' : ''}`}>
             <Avatar name={itemTitle(i)} />
             <span className="min-w-0">
               <span className="block truncate font-medium">{itemTitle(i)}</span>
@@ -86,6 +88,7 @@ export function ItemList({ items }: { items: Item[] }) {
             </span>
             <span className="num font-semibold">{fmtMoney(i.fields?.total, i.fields?.currency)}</span>
           </Link>
+          {action?.(i)}
         </li>
       ))}
     </ul>
@@ -93,7 +96,12 @@ export function ItemList({ items }: { items: Item[] }) {
 }
 
 export default function Attention() {
-  const { summary } = useApp();
+  const { summary, refreshSummary } = useApp();
+  const review = useAction();
+  const reviewed = (ids?: string[]) => review.run(async () => {
+    await api.worthReviewed(ids);
+    await data.reload(); await refreshSummary();
+  }, ids ? ids.join(',') : 'all');
   const data = useLoad(async () => {
     const [needs, waitingAi, worth, failures, lateBackfill] = await Promise.all([
       api.items({ state: 'needs_attention', limit: 200 }), api.items({ state: 'waiting_ai', limit: 200 }),
@@ -170,9 +178,19 @@ export default function Attention() {
       )}
 
       {d && d.worth.length > 0 && (
-        <Card title={t('attention.worth')}>
+        <Card title={t('attention.worth')} actions={d.worth.length > 1 && (
+          <Button variant="secondary" loading={review.is('all')} disabled={review.busy} onClick={() => reviewed()}>
+            <Icon name="check" />{t('attention.worthAllOk')}
+          </Button>
+        )}>
           <p className="text-[13px] text-muted">{t('attention.worthHint')}</p>
-          <ItemList items={d.worth} />
+          <ItemList items={d.worth} action={(i) => (
+            <Button variant="secondary" className="shrink-0 px-3" loading={review.is(i.id)} disabled={review.busy}
+              title={t('attention.worthOkHint')} aria-label={`${t('attention.worthOk')}: ${itemTitle(i)}`} onClick={() => reviewed([i.id])}>
+              <Icon name="check" /><span className="hidden sm:inline">{t('attention.worthOk')}</span>
+            </Button>
+          )} />
+          <ErrorText>{review.error}</ErrorText>
         </Card>
       )}
 

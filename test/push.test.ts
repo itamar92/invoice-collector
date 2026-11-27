@@ -69,10 +69,10 @@ test('sendPush: encrypted POST to each device; a device the service says is gone
   const seen: { url: string; headers: Record<string, string>; body: Buffer }[] = [];
   const f = (async (url: string, init: RequestInit) => {
     seen.push({ url, headers: init.headers as Record<string, string>, body: Buffer.from(init.body as Uint8Array) });
-    return new Response(null, { status: url.includes('apple') ? 410 : 201 });
+    return url.includes('apple') ? new Response('{"reason":"Unregistered"}', { status: 410 }) : new Response(null, { status: 201 });
   }) as unknown as typeof fetch;
   const r = await sendPush({ title: 'T', body: 'B', url: '/items/1' }, f);
-  assert.deepEqual(r, { sent: 1, failed: 1 });
+  assert.deepEqual(r, { sent: 1, failed: 1, devices: 2, errors: ['web.push.apple.com: 410 {"reason":"Unregistered"}'] });
   assert.equal(seen[0]!.headers['Content-Encoding'], 'aes128gcm');
   assert.match(seen[0]!.headers.Authorization!, /^vapid t=/);
   assert.deepEqual(JSON.parse(a.decrypt(seen[0]!.body)), { title: 'T', body: 'B', url: '/items/1' });

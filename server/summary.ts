@@ -20,6 +20,11 @@ export function sanitizeError(s: string | null | undefined): string | null {
 
 const WORTH_DAYS = 14;
 export const worthSince = (now: Date) => new Date(now.getTime() - WORTH_DAYS * 86_400_000).toISOString();
+/**
+ * "Worth a look": filed documents whose vendor recipe failed and was rewritten lately. A document set aside
+ * (ignored / dismissed) is no longer the owner's concern, and one the owner marked checked has recipe_failed cleared.
+ */
+export const WORTH_WHERE = `recipe_failed = 1 AND updated_at >= ? AND state NOT IN ('ignored', 'dismissed')`;
 
 export function summary(now: Date) {
   const db = getDb();
@@ -42,7 +47,7 @@ export function summary(now: Date) {
     needsAttention,
     backfillWaiting: count('awaiting_backfill_approval'),
     inProgress: count('queued') + count('ready'),
-    worthALook: db.prepare('SELECT COUNT(*) FROM items WHERE recipe_failed = 1 AND updated_at >= ?').pluck()
+    worthALook: db.prepare(`SELECT COUNT(*) FROM items WHERE ${WORTH_WHERE}`).pluck()
       .get(worthSince(now)) as number,
     missedOpen: listMissed('open').length,
     ingestFailures,

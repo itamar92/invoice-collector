@@ -6,50 +6,42 @@ import { ButtonLink, Card, Dot, Empty, ErrorText, fmtMoney, Icon, inputCls, Load
 import type { MessageKey } from '../i18n/he.js';
 import { t } from '../i18n/he.js';
 
-const SLOTS = 8;
-const OTHER = '\u0000other';
+const SLOTS = 16;
 const NONE = '\u0000none';
 
-interface Part { category: string; count: number; total: number; link: string }
-/** `parts`: for the "other" slice, the categories folded into it, each with its own link. */
-interface Series { key: string; label: string; color: string; link: string | null; count: number; total: number; parts: Part[] }
+interface Series { key: string; label: string; color: string; link: string; count: number; total: number }
 
 /** The filed documents of one category in one year, as counted here, on the invoices page. */
 const docsLink = (year: number, category: string | null) =>
   `/invoices?${new URLSearchParams({ filed: '1', year: String(year), category: category ?? '-' })}`;
 
 /**
- * One colour per category, tied to the category itself: its place in the settings list picks the slot, so a
- * category keeps its colour whichever year is shown. Categories beyond the eight slots fold into "other".
+ * One series per category, each shown on its own. The colour is tied to the category: its place in the settings
+ * list picks the slot, so a category keeps its colour whichever year is shown; categories not in the list take
+ * the slots left free. Past sixteen categories the colours repeat.
  */
 function buildSeries(s: Stats, configured: string[]): { series: Series[]; keyOf: (category: string | null) => string } {
   const present = s.categories.filter((c) => c.category !== null).map((c) => c.category!);
   const slot = new Map<string, number>();
-  for (const name of configured.slice(0, SLOTS)) if (present.includes(name)) slot.set(name, configured.indexOf(name) + 1);
-  const free = Array.from({ length: SLOTS }, (_, i) => i + 1).filter((n) => ![...slot.values()].includes(n));
-  const rest = present.filter((n) => !slot.has(n))
-    .sort((a, b) => (configured.indexOf(a) + 1 || 999) - (configured.indexOf(b) + 1 || 999) || a.localeCompare(b));
-  for (const name of rest) { const n = free.shift(); if (n) slot.set(name, n); }
-
-  const keyOf = (category: string | null) => (category === null ? NONE : slot.has(category) ? category : OTHER);
-  const byKey = new Map<string, Series>();
-  for (const c of s.categories) {
-    const key = keyOf(c.category);
-    const cur = byKey.get(key) ?? {
-      key, count: 0, total: 0,
-      label: key === NONE ? t('dash.noCategory') : key === OTHER ? t('dash.other') : key,
-      color: key === NONE ? 'var(--cat-none)' : key === OTHER ? 'var(--cat-other)' : `var(--cat-${slot.get(key)})`,
-      link: key === OTHER ? null : docsLink(s.year, c.category),
-      parts: [],
-    };
-    cur.count += c.count; cur.total += c.total;
-    if (key === OTHER && c.category !== null) {
-      cur.parts.push({ category: c.category, count: c.count, total: c.total, link: docsLink(s.year, c.category) });
-    }
-    byKey.set(key, cur);
+  for (const name of present) {
+    const i = configured.indexOf(name);
+    if (i >= 0) slot.set(name, (i % SLOTS) + 1);
   }
-  const tail = (k: string) => (k === NONE ? 2 : k === OTHER ? 1 : 0);
-  const series = [...byKey.values()].sort((a, b) => tail(a.key) - tail(b.key) || b.count - a.count || a.label.localeCompare(b.label));
+  const used = new Set(slot.values());
+  const free = Array.from({ length: SLOTS }, (_, i) => i + 1).filter((n) => !used.has(n));
+  let k = 0;
+  for (const name of present.filter((n) => !slot.has(n)).sort((a, b) => a.localeCompare(b))) {
+    slot.set(name, free.length ? free.shift()! : (k++ % SLOTS) + 1);
+  }
+
+  const keyOf = (category: string | null) => category ?? NONE;
+  const series: Series[] = s.categories.map((c) => ({
+    key: keyOf(c.category), count: c.count, total: c.total,
+    label: c.category === null ? t('dash.noCategory') : c.category,
+    color: c.category === null ? 'var(--cat-none)' : `var(--cat-${slot.get(c.category)})`,
+    link: docsLink(s.year, c.category),
+  }));
+  series.sort((a, b) => Number(a.key === NONE) - Number(b.key === NONE) || b.count - a.count || a.label.localeCompare(b.label));
   return { series, keyOf };
 }
 
@@ -121,7 +113,6 @@ export default function Dashboard() {
   useEffect(() => { void refreshSummary(); }, [refreshSummary]);
   const [year, setYear] = useState<number | undefined>(undefined);
   const [active, setActive] = useState<string | null>(null);
-  const [openOther, setOpenOther] = useState(false);
   const load = useLoad(() => api.stats(year), [year]);
   const s = load.data;
   const configured = settings!.settings.categories.map((c) => c.name);
@@ -178,30 +169,7 @@ export default function Dashboard() {
                     const cls = `-mx-2 block w-full rounded-xl px-2 py-2 text-start transition-[opacity,background-color] ${dim(x.key)}`;
                     return (
                       <li key={x.key} className={rowCls} {...hover(x.key)}>
-                        {x.link ? <Link to={x.link} className={`${cls} hover:bg-ground`}>{body}</Link> : x.parts.length ? (
-                          <>
-                            <button type="button" className={`${cls} hover:bg-ground`} aria-expanded={openOther} onClick={() => setOpenOther(!openOther)}>
-                              {body}
-                              <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-accent-deep">
-                                {t(openOther ? 'dash.otherHide' : 'dash.otherShow', { n: x.parts.length })}
-                                <Icon name={openOther ? 'up' : 'down'} className="size-3.5" />
-                              </span>
-                            </button>
-                            {openOther && (
-                              <ul className="mb-2 ms-5 border-s-2 border-line ps-3">
-                                {x.parts.map((p) => (
-                                  <li key={p.category}>
-                                    <Link to={p.link} className="-mx-2 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 rounded-lg px-2 py-1.5 text-sm hover:bg-ground">
-                                      <span className="truncate">{p.category}</span>
-                                      <span className="num text-[13px] text-muted">{t('dash.docs', { n: p.count })}</span>
-                                      <span className="num font-medium">{fmtMoney(p.total, s.currency)}</span>
-                                    </Link>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </>
-                        ) : <div className={cls}>{body}</div>}
+                        <Link to={x.link} className={`${cls} hover:bg-ground`}>{body}</Link>
                       </li>
                     );
                   })}

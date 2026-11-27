@@ -12,8 +12,8 @@ import { listIngestFailures } from './core/ingestFailures.js';
 import {
   getEmail, getItem, getItemPdf, isUploadId, listItems, ITEM_SORTS, setItemFields, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
-import { listMissed, hideMissed, queueMissed } from './core/missed.js';
-import { listNotifications, markNotificationsRead, unreadNotifications } from './core/notifications.js';
+import { listMissed, hideAllMissed, hideMissed, queueMissed } from './core/missed.js';
+import { clearNotifications, listNotifications, markNotificationsRead, unreadNotifications } from './core/notifications.js';
 import { deletePushSubscription, isAllowedEndpoint, savePushSubscription, sendPush, vapidPublicKey } from './push.js';
 import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
@@ -34,7 +34,7 @@ import { checkCatchup, listCatchup, markCatchup, sendCatchup, type Lookup } from
 import { chooseStorage } from './destinations/storage.js';
 import { getSecret, secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
 import { stats } from './stats.js';
-import { sanitizeError, summary, worthSince } from './summary.js';
+import { sanitizeError, summary, WORTH_WHERE, worthSince } from './summary.js';
 import type { SecretKey } from './secrets.js';
 import { getSettings, updateSettings } from './settings.js';
 import type { Settings } from './settings.js';
@@ -245,7 +245,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.get('/items', wrap((req, res) => {
     const q = parse(ListQuery, req.query);
     const worthIds = q.worth
-      ? new Set(getDb().prepare('SELECT id FROM items WHERE recipe_failed = 1 AND updated_at >= ?').pluck()
+      ? new Set(getDb().prepare(`SELECT id FROM items WHERE ${WORTH_WHERE}`).pluck()
         .all(worthSince(clock())) as string[])
       : null;
     const filter = {
@@ -258,6 +258,17 @@ export function apiRouter(ctx: ApiContext): express.Router {
       : listItems({ ...filter, limit: q.limit, offset: q.offset }))
       .map(({ text, ...rest }) => ({ ...rest, hasText: !!text?.trim(), email: emailOf(rest.messageId) }));
     res.json({ items, limit: q.limit, offset: q.offset });
+  }));
+
+  // "Worth a look" checked by the owner: clears the flag without touching updated_at (a later failure sets it again).
+  r.post('/items/worth-reviewed', wrap((req, res) => {
+    const { ids } = parse(z.object({ ids: z.array(z.string().max(200)).max(500).optional() }).strict(), req.body ?? {});
+    const db = getDb();
+    const changed = !ids
+      ? db.prepare(`UPDATE items SET recipe_failed = 0 WHERE ${WORTH_WHERE}`).run(worthSince(clock())).changes
+      : ids.length === 0 ? 0
+        : db.prepare(`UPDATE items SET recipe_failed = 0 WHERE recipe_failed = 1 AND id IN (${ids.map(() => '?').join(',')})`).run(...ids).changes;
+    res.json({ changed });
   }));
 
   r.get('/items/:id', wrap((req, res) => {
@@ -491,6 +502,10 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const { ids } = parse(z.object({ ids: z.array(z.number().int()).max(500).optional() }).strict(), req.body ?? {});
     res.json({ changed: markNotificationsRead(ids), unread: unreadNotifications() });
   }));
+  r.post('/notifications/clear', wrap((req, res) => {
+    const { ids } = parse(z.object({ ids: z.array(z.number().int()).max(500).optional() }).strict(), req.body ?? {});
+    res.json({ changed: clearNotifications(ids), unread: unreadNotifications() });
+  }));
 
   // Web Push: the device (browser or home-screen app) subscribes with this instance's public key.
   r.get('/push/key', wrap((_req, res) => { res.json({ publicKey: vapidPublicKey() }); }));
@@ -710,6 +725,7 @@ export function apiRouter(ctx: ApiContext): express.Router {
 
   // ---------- missed ----------
   r.get('/missed', wrap((_req, res) => { res.json(listMissed()); }));
+  r.post('/missed/hide-all', wrap((_req, res) => { res.json({ hidden: hideAllMissed() }); }));
   r.post('/missed/:id/queue', wrap(async (req, res) => {
     const id = param(req, 'id');
     if (!listMissed().some((m) => m.messageId === id)) throw notFound('missed');

@@ -93,17 +93,27 @@ export function countPushSubscriptions(): number {
  * Sends `msg` to every subscription. A subscription the push service says is gone (404/410) is forgotten.
  * Never throws: a failed push must not affect the document it is about.
  */
-export async function sendPush(msg: PushMessage, fetchImpl: typeof fetch = fetch): Promise<{ sent: number; failed: number }> {
+export interface PushResult { sent: number; failed: number; devices: number; errors: string[] }
+
+export async function sendPush(msg: PushMessage, fetchImpl: typeof fetch = fetch): Promise<PushResult> {
   let rows: { endpoint: string; p256dh: string; auth: string }[];
   try {
     rows = getDb().prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions').all() as typeof rows;
-  } catch { return { sent: 0, failed: 0 }; }
+  } catch { return { sent: 0, failed: 0, devices: 0, errors: [] }; }
   let sent = 0;
   let failed = 0;
+  const errors: string[] = [];
+  // A failed push is otherwise invisible: say which push service refused it and why (Apple/Google send a reason).
+  const fail = (endpoint: string, why: string) => {
+    failed++;
+    const host = (() => { try { return new URL(endpoint).hostname; } catch { return 'unknown'; } })();
+    errors.push(`${host}: ${why}`.slice(0, 200));
+    console.warn(`[push] ${host}: ${why}`);
+  };
   const payload = Buffer.from(JSON.stringify(msg));
   for (const r of rows) {
     try {
-      if (!isAllowedEndpoint(r.endpoint)) { deletePushSubscription(r.endpoint); failed++; continue; }
+      if (!isAllowedEndpoint(r.endpoint)) { deletePushSubscription(r.endpoint); fail(r.endpoint, 'endpoint not allowed'); continue; }
       const res = await fetchImpl(r.endpoint, {
         method: 'POST',
         headers: {
@@ -115,10 +125,11 @@ export async function sendPush(msg: PushMessage, fetchImpl: typeof fetch = fetch
       });
       if (res.ok) sent++;
       else {
-        failed++;
+        const reason = await res.text().catch(() => '');
+        fail(r.endpoint, `${res.status} ${reason.replace(/\s+/g, ' ').trim()}`.trim());
         if (res.status === 404 || res.status === 410) deletePushSubscription(r.endpoint);
       }
-    } catch { failed++; }
+    } catch (e) { fail(r.endpoint, (e as Error).message || 'network error'); }
   }
-  return { sent, failed };
+  return { sent, failed, devices: rows.length, errors };
 }
