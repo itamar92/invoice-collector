@@ -11,6 +11,8 @@ import { t } from '../i18n/he.js';
 import type { MessageKey } from '../i18n/he.js';
 
 const EDITABLE: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_backfill_approval', 'ready'];
+/** Filed (and maybe sent): the details can still be fixed, in the app's record only. */
+const PROCESSED: ItemState[] = ['stored', 'done'];
 const DOC_TYPES = ['tax_invoice', 'receipt', 'tax_invoice_receipt', 'credit_note', 'other'] as const;
 
 type FieldKey = Exclude<keyof ExtractedFields, 'vatConfirmed'>;
@@ -63,7 +65,8 @@ export default function ItemDetail() {
   if (!item) return <ErrorText>{load.error}</ErrorText>;
 
   const orig = toDraft(item.fields);
-  const editable = EDITABLE.includes(item.state);
+  const processed = PROCESSED.includes(item.state);
+  const editable = EDITABLE.includes(item.state) || processed;
   const fieldPatch = diff(draft, orig);
   // The VAT approval travels with the fields; it only matters while the VAT does not add up.
   const patch = fieldPatch === null ? null
@@ -80,6 +83,13 @@ export default function ItemDetail() {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) navigate(-1); else navigate('/attention', { replace: true });
   };
+  /** A filed document: save the fix and stay on the page (the state does not change). */
+  const fix = () => act.run(async () => {
+    setMsg(null);
+    const r = await api.saveFields(item.id, patch!);
+    setProblems(r.problems);
+    await refresh(t('item.fixSaved'));
+  }, 'save');
   const save = (andSend: boolean) => act.run(async () => {
     setMsg(null);
     let valid = item.state === 'ready';
@@ -186,6 +196,7 @@ export default function ItemDetail() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <Card title={t('item.fields')}>
           {!editable && <p className="mb-2 text-xs text-muted">{t('item.readOnly')}</p>}
+          {processed && <p className="mb-2 rounded-xl bg-info-tint px-3 py-2 text-xs">{t(item.accountingRef ? 'item.fixHintSent' : 'item.fixHint')}</p>}
           <div className="grid grid-cols-6 gap-x-2.5 gap-y-2.5">
             <Field className="col-span-6" label={t('field.vendorName')}>{input('vendorName')}</Field>
             <Field className="col-span-2" label={t('field.total')}>{input('total', { ltr: true })}</Field>
@@ -227,9 +238,10 @@ export default function ItemDetail() {
           )}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {editable && <Button loading={act.is('save')} disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
-            {editable && item.emailMode !== 'backfill' && <Button variant="secondary" loading={act.is('send')} disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
-            {editable && !item.storagePath && item.hasText && <Button variant="ghost" loading={act.is('reparse')} disabled={act.busy} onClick={reparse}>{t('item.reparse')}</Button>}
+            {processed && <Button loading={act.is('save')} disabled={!dirty || act.busy} onClick={fix}>{t('item.fixSave')}</Button>}
+            {editable && !processed && <Button loading={act.is('save')} disabled={!dirty || act.busy} onClick={() => save(false)}>{t('item.save')}</Button>}
+            {editable && !processed && item.emailMode !== 'backfill' && <Button variant="secondary" loading={act.is('send')} disabled={act.busy || patch === null || (!dirty && item.state !== 'ready')} onClick={() => save(true)}>{t('item.saveSend')}</Button>}
+            {editable && !processed && !item.storagePath && item.hasText && <Button variant="ghost" loading={act.is('reparse')} disabled={act.busy} onClick={reparse}>{t('item.reparse')}</Button>}
             {item.state === 'needs_attention' && <Button variant="secondary" loading={act.is('retry')} disabled={act.busy} onClick={retry}>{t('item.retry')}</Button>}
             {(item.state === 'dismissed' || (item.state === 'ignored' && !invoiceOf)) && <Button variant="secondary" loading={act.is('restore')} disabled={act.busy} onClick={restore}>{t('item.restore')}</Button>}
             {item.state !== 'dismissed' && item.state !== 'ignored' && !(item.storagePath || item.accountingRef) && <Button variant="danger" className="ms-auto" loading={act.is('dismiss')} disabled={act.busy} onClick={dismiss}>{t('item.dismiss')}</Button>}
@@ -255,7 +267,7 @@ export default function ItemDetail() {
           )}
           <ErrorText>{act.error}</ErrorText>
 
-          {item.hasText && (editable || item.vendorKey) && (
+          {item.hasText && !processed && (editable || item.vendorKey) && (
             <RecipeFromFix canSave={patch !== null} dirty={dirty} disabled={act.busy} saveFirst={saveForRecipe} onRecipeSaved={() => void refreshSummary()} />
           )}
 

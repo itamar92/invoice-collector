@@ -252,6 +252,19 @@ export function setItemFields(id: string, fields: ExtractedFields, provenance: P
     [JSON.stringify(fields), provenance]);
 }
 
+export class DuplicateFieldsError extends Error {}
+
+/** Like setItemFields, but an edit that would duplicate another document throws instead of dismissing this one. */
+export function setItemFieldsStrict(id: string, fields: ExtractedFields, provenance: Provenance): void {
+  try {
+    getDb().prepare('UPDATE items SET fields_json = ?, provenance = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(fields), provenance, now(), id);
+  } catch (e) {
+    if ((e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') throw new DuplicateFieldsError('duplicate');
+    throw e;
+  }
+}
+
 export function setItemVendor(id: string, vendorKey: string): void {
   updateOrDismissDuplicate(id, 'UPDATE items SET vendor_key = ?, updated_at = ? WHERE id = ?', [vendorKey]);
 }
