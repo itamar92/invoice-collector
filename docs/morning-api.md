@@ -31,6 +31,26 @@ The server looks each document up again right before sending; a found one is rec
 `existing`, ref `expense:<id>` or `draft:<id>`) instead of sent. A lookup error stops that document. Without API keys
 (email mode) nothing can be checked and the page says so.
 
+## Check before every send (pipeline, server side)
+Before the pipeline sends a document it asks `MorningAccounting.findExisting` (the same read-only `MorningLookup` as
+the catch-up page: expenses by number, recent pending drafts). found → not sent; the item records `expense:<id>` or
+`draft:<id>` with mode `existing` and note `already_in_accounting:…`. maybe → sent, noted `accounting_maybe_exists:…`.
+Morning unreachable (429/5xx/network) → the item retries later, nothing sent. A refused search (4xx) → sent, noted
+`accounting_check_failed`. No API keys (email mode) → no check, sent as before.
+
+## Waiting for approval (page "ממתינים ב-Morning", `server/core/drafts.ts`)
+- Lists drafts with status 10 (new) from `POST /expenses/drafts/search` (last 400 days). 50 failed / 200 declined are
+  not waiting. Each draft is tied to the document we sent: by our ref (the S3 key) found in the draft's file key or
+  `url`, else number + amount + supplier, else a "maybe" (number plus one of the other two).
+- There is **no approve-draft endpoint** in the v2 spec. "Approve with the app's details" runs only on the owner's
+  click for one draft: `POST /expenses/search` by number (an equal expense is reused, never created twice) →
+  `POST /expenses` with our fields and the category's `accountingClassification.id` (required: no mapping, no approve)
+  → our PDF attached via `GET /file-upload/v1/url` with `data {"id":<expenseId>,"source":5,"state":"expense"}` (an
+  existing expense only when its `url` shows no file) → `DELETE /expenses/drafts/{id}` (undocumented). The draft is
+  deleted only when the expense holds a file; otherwise, or when the delete is refused, the owner deletes it in Morning.
+- `reportingDate`: Morning's proposal from the draft, never earlier than the document's month.
+- The document's ref becomes `expense:<id>`, so later removal never touches it.
+
 ## Expense upload (v2), used by api_file
 1. `GET {upload host}/file-upload/v1/url?context=expense&data={"source":5}` (authenticated) returns
    `{url, fields, maxFileSize}`, a pre-signed S3 POST that is valid for **60 seconds**. Here `data {"source":5}` means

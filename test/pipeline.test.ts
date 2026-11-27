@@ -1195,3 +1195,51 @@ test('a personal supplier\'s document is announced as filed, not sent', async ()
   assert.equal(n!.itemId, id);
   assert.equal(n!.data.sent, false);
 });
+
+// ---------- check in Morning before sending ----------
+
+type Existing = Awaited<ReturnType<NonNullable<AccountingDestination['findExisting']>>>;
+function checkingAccounting(answer: () => Promise<Existing>) {
+  const a = fakeAccounting();
+  const seen: ExtractedFields[] = [];
+  return Object.assign(a, { seen, findExisting: async (f: ExtractedFields) => { seen.push(f); return answer(); } });
+}
+
+test('already in Morning → not sent; the Morning id is recorded and the document is done', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const { id } = newItem(invoiceText());
+  const acc = checkingAccounting(async () => ({ status: 'found', where: 'draft', morningId: 'dr-7' }));
+  assert.equal(await processItem(id, deps({ accounting: acc })), 'done');
+  assert.equal(acc.calls.length, 0);
+  assert.equal(acc.seen[0]!.docNumber, getItem(id)!.fields!.docNumber);
+  const it = getItem(id)!;
+  assert.equal(it.accountingRef, 'draft:dr-7');
+  assert.equal(it.accountingMode, 'existing');
+  assert.ok(notes(id).includes('already_in_accounting:draft:dr-7'));
+});
+
+test('not in Morning (or no way to look) → sent as before; a "maybe" is sent with a note', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  for (const [answer, note] of [[{ status: 'not_found' }, null], [null, null], [{ status: 'maybe', where: 'expense', morningId: 'e-1' }, 'accounting_maybe_exists:expense:e-1']] as const) {
+    const { id } = newItem(invoiceText({ num: `N${seq}` }));
+    const acc = checkingAccounting(async () => answer as Existing);
+    assert.equal(await processItem(id, deps({ accounting: acc })), 'done');
+    assert.equal(acc.calls.length, 1);
+    if (note) assert.ok(notes(id).includes(note));
+  }
+});
+
+test('Morning unreachable for the check → retried later, nothing sent; a refused search still sends', async () => {
+  knownVendor('acme', 'billing@acme.example', 'business');
+  const { id } = newItem(invoiceText());
+  const down = checkingAccounting(async () => { throw new TransientError('Morning 503'); });
+  assert.equal(await processItem(id, deps({ accounting: down })), 'stored');
+  assert.equal(down.calls.length, 0);
+  assert.ok(getItem(id)!.nextAttemptAt);
+
+  const { id: id2 } = newItem(invoiceText({ num: 'Z9' }));
+  const refused = checkingAccounting(async () => { throw new AccountingRejected('search not allowed'); });
+  assert.equal(await processItem(id2, deps({ accounting: refused })), 'done');
+  assert.equal(refused.calls.length, 1);
+  assert.ok(notes(id2).some((n) => n.startsWith('accounting_check_failed')));
+});

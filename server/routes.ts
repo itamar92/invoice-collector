@@ -29,7 +29,8 @@ import { FolderConflictError, FolderNotFoundError } from './core/types.js';
 import type { Deps, ExtractedFields, ItemState } from './core/types.js';
 import { validateFields } from './core/validate.js';
 import { currentTenantId, getDb } from './db.js';
-import { detectMorningModes, fetchMorningClassifications, MorningLookup, type MorningClassification } from './destinations/morning.js';
+import { detectMorningModes, fetchMorningClassifications, MorningDrafts, MorningLookup, type MorningClassification } from './destinations/morning.js';
+import { approveDraft, ApproveError, matchDrafts, type DraftsSource } from './core/drafts.js';
 import { checkCatchup, listCatchup, markCatchup, sendCatchup, type Lookup } from './core/catchup.js';
 import { chooseStorage } from './destinations/storage.js';
 import { getSecret, secretStatus, SECRET_KEYS, setSecret } from './secrets.js';
@@ -61,6 +62,8 @@ export interface ApiContext {
   telegramInfo?: () => Promise<{ username: string }>;
   /** Injectable for tests; default searches Morning's expenses and drafts (read-only). Null: no API keys. */
   morningLookup?: () => Lookup | null;
+  /** Injectable for tests; default talks to Morning's drafts (list is read-only; approve writes, on the owner's click). Null: no API keys. */
+  morningDrafts?: () => DraftsSource | null;
   /** Injectable for tests; default talks to the shared-bot hub over HTTP. */
   relayClient?: (url: string, auth: string | null) => RelayClient;
   now?: () => Date;
@@ -124,6 +127,7 @@ const StatsQuery = z.object({ year: z.coerce.number().int().min(2000).max(2100).
 const Ids = z.object({ ids: z.array(z.string().min(1)).max(1000) }).strict();
 /** Catch-up check and send run in small batches so each request stays short; the page sends batch after batch. */
 const CatchupBatch = z.object({ ids: z.array(z.string().min(1)).min(1).max(25) }).strict();
+const DraftApprove = z.object({ itemId: z.string().min(1).max(200) }).strict();
 const CatchupMark = z.object({
   ids: z.array(z.string().min(1)).min(1).max(1000),
   as: z.enum(['in_morning', 'skipped']),
@@ -918,6 +922,31 @@ export function apiRouter(ctx: ApiContext): express.Router {
   r.post('/morning/catchup/mark', wrap((req, res) => {
     const { ids, as, refs } = parse(CatchupMark, req.body);
     res.json({ changed: markCatchup(ids, as, getSettings(), refs) });
+  }));
+
+  // ---------- drafts waiting for the owner's approval in Morning ----------
+  const draftsNow = (): DraftsSource | null => (ctx.morningDrafts
+    ? ctx.morningDrafts()
+    : getSecret('morning_id') && getSecret('morning_secret') ? new MorningDrafts() : null);
+  r.get('/morning/drafts', wrap(async (_req, res) => {
+    const src = draftsNow();
+    if (!src) { res.json({ configured: false, rows: [] }); return; }
+    try {
+      res.json({ configured: true, rows: matchDrafts(await src.listPending(), getSettings()) });
+    } catch (e) {
+      res.status(502).json({ error: 'morning_unavailable', message: sanitizeError(e instanceof Error ? e.message : String(e)) });
+    }
+  }));
+  r.post('/morning/drafts/:id/approve', wrap(async (req, res) => {
+    const { itemId } = parse(DraftApprove, req.body);
+    const src = draftsNow();
+    if (!src) throw new HttpError(409, 'morning_no_api_keys');
+    try {
+      res.json({ result: await approveDraft(param(req, 'id'), itemId, getSettings(), src) });
+    } catch (e) {
+      if (e instanceof ApproveError) { res.status(e.status).json({ error: e.code }); return; }
+      res.status(502).json({ error: 'morning_unavailable', message: sanitizeError(e instanceof Error ? e.message : String(e)) });
+    }
   }));
 
   r.get('/morning/classifications', wrap(async (_req, res) => {
