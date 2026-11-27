@@ -146,6 +146,7 @@ const ICONS = {
   check: <path d="m4.5 10.5 3.5 3.5 7.5-8" />,
   send: <><path d="M16.5 3.5 3.5 9l5 2 2 5z" /><path d="m8.5 11 8-7.5" /></>,
   close: <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />,
+  pencil: <><path d="M12.5 4.5 15.5 7.5 7 16H4v-3z" /><path d="m11 6 3 3" /></>,
   alert: <><circle cx="10" cy="10" r="7" /><path d="M10 6.5v4" /><circle cx="10" cy="13.4" r="0.6" fill="currentColor" /></>,
   down: <path d="m5.5 8 4.5 4.5L14.5 8" />,
   up: <path d="m5.5 12 4.5-4.5 4.5 4.5" />,

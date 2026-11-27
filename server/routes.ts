@@ -10,7 +10,7 @@ import {
 } from './core/backfill.js';
 import { listIngestFailures } from './core/ingestFailures.js';
 import {
-  getEmail, getItem, getItemPdf, isUploadId, listItems, ITEM_SORTS, setItemFields, setItemVendor, transition, isTerminal, updateItem,
+  getEmail, getItem, getItemPdf, isUploadId, listItems, ITEM_SORTS, setItemFields, setItemFieldsStrict, DuplicateFieldsError, noteItem, setItemVendor, transition, isTerminal, updateItem,
 } from './core/items.js';
 import { listMissed, hideAllMissed, hideMissed, queueMissed } from './core/missed.js';
 import { clearNotifications, listNotifications, markNotificationsRead, unreadNotifications } from './core/notifications.js';
@@ -317,11 +317,14 @@ export function apiRouter(ctx: ApiContext): express.Router {
   }));
 
   const EDITABLE: ItemState[] = ['needs_attention', 'awaiting_vendor', 'awaiting_backfill_approval', 'ready'];
+  /** Filed (and maybe sent): their details can still be corrected, as a record-only fix. */
+  const PROCESSED: ItemState[] = ['stored', 'done'];
   r.put('/items/:id/fields', wrap((req, res) => {
     const patch = parse(FieldsPatch, req.body);
     const item = getItem(param(req, 'id'));
     if (!item) throw notFound('item');
-    if (!EDITABLE.includes(item.state)) throw new HttpError(409, 'item_not_editable');
+    const processed = PROCESSED.includes(item.state);
+    if (!EDITABLE.includes(item.state) && !processed) throw new HttpError(409, 'item_not_editable');
     if (Object.keys(patch).length === 0) throw new HttpError(400, 'empty_patch');
     if (patch.category && !getSettings().categories.some((c) => c.name === patch.category)) {
       throw new HttpError(400, 'unknown_category');
@@ -331,6 +334,21 @@ export function apiRouter(ctx: ApiContext): express.Router {
       vat: null, net: null, currency: null, allocationNumber: null, description: null, category: null,
     };
     const fields: ExtractedFields = { ...empty, ...(item.fields ?? {}), ...patch };
+    const today = clock().toISOString().slice(0, 10);
+    if (processed) {
+      // Already filed (and maybe sent): a correction of our record only. The state stays, the filed copy and
+      // Morning are not touched, and an edit that would make it a copy of another document is refused rather than
+      // dismissing a filed document.
+      try { setItemFieldsStrict(item.id, fields, 'manual'); } catch (e) {
+        if (e instanceof DuplicateFieldsError) throw new HttpError(409, 'item_fix_duplicate');
+        throw e;
+      }
+      const changed = Object.keys(patch).filter((k) => k !== 'vatConfirmed');
+      noteItem(item.id, `manual_fix_after_processing:${changed.join(',') || 'vatConfirmed'}`);
+      const check = validateFields(fields, getSettings(), today);
+      res.json({ item: getItem(item.id)!, valid: check.ok, problems: check.ok ? [] : check.problems });
+      return;
+    }
     setItemFields(item.id, fields, 'manual');
     // An item that never had a vendor (AI could not name one) gets it from the edit, and then needs the
     // vendor decision like any new vendor: it must never be filed without one.
@@ -343,7 +361,6 @@ export function apiRouter(ctx: ApiContext): express.Router {
         vendorAssigned = true;
       }
     }
-    const today = clock().toISOString().slice(0, 10);
     const check = validateFields(fields, getSettings(), today);
     let after = getItem(item.id)!;
     const vendor = after.vendorKey ? getVendor(after.vendorKey) : null;

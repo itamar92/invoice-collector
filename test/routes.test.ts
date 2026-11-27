@@ -575,13 +575,47 @@ test('invalid edit of a ready item returns it to needs_attention; empty patch an
   assert.equal(((await ok.json()) as any).item.state, 'ready');
 });
 
-test('editing a done / stored / ignored item -> 409', async () => {
+test('editing an ignored / dismissed item -> 409', async () => {
   const { call } = await boot();
-  for (const [i, st] of (['done', 'stored', 'ignored'] as const).entries()) {
+  for (const [i, st] of (['ignored', 'dismissed'] as const).entries()) {
     const id = item('needs_attention', FIELDS, `x${i}`);
     transition(id, st);
     assert.equal((await call('PUT', `/api/items/${id}/fields`, { description: 'x' })).status, 409, st);
   }
+});
+
+test('a filed / sent item can be fixed: fields saved, state and filing untouched, noted in history', async () => {
+  const { call } = await boot();
+  for (const [i, st] of (['done', 'stored'] as const).entries()) {
+    const id = item('needs_attention', FIELDS, `f${i}`);
+    transition(id, st);
+    updateItem(id, { storagePath: `/x/f${i}.pdf`, accountingRef: st === 'done' ? `draft:d${i}` : null });
+    const res = await call('PUT', `/api/items/${id}/fields`, { docNumber: `77${i}`, total: null });
+    assert.equal(res.status, 200, st);
+    const body = (await res.json()) as any;
+    assert.equal(body.item.state, st); // an invalid fix does not send it back to needs_attention
+    assert.equal(body.valid, false);
+    assert.deepEqual(body.problems, ['missing_total']);
+    const after = getItem(id)!;
+    assert.equal(after.fields!.docNumber, `77${i}`);
+    assert.equal(after.provenance, 'manual');
+    assert.equal(after.storagePath, `/x/f${i}.pdf`);
+    const notes = getDb().prepare('SELECT note FROM item_events WHERE item_id = ?').pluck().all(id) as string[];
+    assert.ok(notes.some((n) => n?.startsWith('manual_fix_after_processing:docNumber,total')), st);
+  }
+});
+
+test('fixing a filed item into a copy of another document -> 409, nothing dismissed', async () => {
+  const key = businessVendor();
+  const a = item('needs_attention', FIELDS, 'd1');
+  const b = item('needs_attention', { ...FIELDS, docNumber: '2002' }, 'd2');
+  for (const id of [a, b]) { setItemVendor(id, key); transition(id, 'done'); }
+  const { call } = await boot();
+  const res = await call('PUT', `/api/items/${b}/fields`, { docNumber: '1001' });
+  assert.equal(res.status, 409);
+  assert.equal(((await res.json()) as any).error, 'item_fix_duplicate');
+  assert.equal(getItem(b)!.state, 'done');
+  assert.equal(getItem(b)!.fields!.docNumber, '2002');
 });
 
 test('worthALook counts recent recipe_failed items only; ?worth=1 lists them', async () => {
