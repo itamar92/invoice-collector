@@ -1,6 +1,6 @@
 import { getDb } from '../db.js';
 import { sendPush } from '../push.js';
-import { getSettings } from '../settings.js';
+import { getSettings, updateSettings } from '../settings.js';
 import { getEmail, getItem } from './items.js';
 
 /**
@@ -41,7 +41,14 @@ export function notifyProcessed(itemId: string, sent: boolean, now = new Date())
   db.prepare('INSERT INTO notifications (at, kind, item_id, data_json) VALUES (?, ?, ?, ?)')
     .run(now.toISOString(), 'processed', itemId, JSON.stringify(data));
   db.prepare(`DELETE FROM notifications WHERE id <= (SELECT MAX(id) FROM notifications) - ?`).run(MAX_KEPT);
-  if (db.prepare('SELECT 1 FROM push_subscriptions LIMIT 1').get()) void sendPush(pushText(itemId, data)).catch(() => {});
+  const at = now.toISOString();
+  if (!db.prepare('SELECT 1 FROM push_subscriptions LIMIT 1').get()) {
+    updateSettings({ lastPush: { at, devices: 0, sent: 0, error: null } });
+    return;
+  }
+  void sendPush(pushText(itemId, data))
+    .then((r) => { updateSettings({ lastPush: { at, devices: r.devices, sent: r.sent, error: r.errors.join(' · ').slice(0, 300) || null } }); })
+    .catch(() => {});
 }
 
 /** The device notification (Hebrew; the push service shows it as is). */

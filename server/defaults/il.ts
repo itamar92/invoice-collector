@@ -69,4 +69,5 @@ export const IL_DEFAULTS: Settings = {
   ownTaxIds: [],
   autoApproveVendors: true,
   storageInbox: false,
+  lastPush: null,
 };

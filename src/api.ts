@@ -235,6 +235,7 @@ export const api = {
   pushKey: () => get<{ publicKey: string }>('/api/push/key'),
   pushSubscribe: (sub: PushSubscriptionJSON) => send<{ ok: true }>('POST', '/api/push/subscribe', sub),
   pushUnsubscribe: (endpoint: string) => send<{ ok: true }>('POST', '/api/push/unsubscribe', { endpoint }),
+  pushStatus: () => get<{ devices: number; last: Settings['lastPush'] }>('/api/push/status'),
   pushTest: () => send<{ sent: number; failed: number; devices: number; errors: string[] }>('POST', '/api/push/test'),
   clearNotifications: (ids?: number[]) => send<{ changed: number; unread: number }>('POST', '/api/notifications/clear', ids ? { ids } : {}),
   /** "Worth a look" documents the owner checked: off that list (until the vendor's recipe fails on them again). */

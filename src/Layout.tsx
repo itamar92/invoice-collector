@@ -83,9 +83,9 @@ function useScrollMemory(): void {
 
 export function Brand({ className = '' }: { className?: string }) {
   return (
-    <span className={`flex items-center gap-2 ${className}`}>
+    <span className={`flex min-w-0 items-center gap-2 ${className}`}>
       <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent text-white"><Icon name="list" /></span>
-      <span className="display text-xl">{t('app.name')}</span>
+      <span className="display min-w-0 text-xl">{t('app.name')}</span>
     </span>
   );
 }
@@ -135,13 +135,16 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       {/* phone: top bar with the worker status */}
       <header className="sticky top-0 z-20 border-b border-line bg-ground md:hidden">
         <div className="flex items-center justify-between gap-2 px-4 py-2">
-          <Link to="/attention" className="min-w-0">
+          <Link to="/attention" className="min-w-0 flex-1">
             <Brand />
           </Link>
           <div className="flex shrink-0 items-center gap-2">
             <NotificationBell align="end" />
-            <Button variant="secondary" className={`${RUN_CLS} px-3`} loading={run.busy} onClick={runNow}>
-              {!run.busy && <Icon name="refresh" />}{run.busy ? t('worker.running') : t('worker.runNow')}
+            {/* On a narrow phone the label would push the app's name under the bell: icon only there. */}
+            <Button variant="secondary" className={`${RUN_CLS} w-11 px-0 min-[440px]:w-auto min-[440px]:px-3`} loading={run.busy} onClick={runNow}
+              aria-label={run.busy ? t('worker.running') : t('worker.runNow')} title={t('worker.runNow')}>
+              {!run.busy && <Icon name="refresh" />}
+              <span className="hidden min-[440px]:inline">{run.busy ? t('worker.running') : t('worker.runNow')}</span>
             </Button>
             <Button className="w-11 px-0 shadow-soft" loading={upload.busy} onClick={upload.pick} aria-label={t('upload.button')} title={t('upload.button')}>
               {upload.busy ? <span className="ai-dots"><span /><span /><span /></span> : <Icon name="camera" />}
