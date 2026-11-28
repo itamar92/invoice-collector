@@ -80,6 +80,10 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<AppNotification[] | null>(null);
   const push = usePush();
+  const [pushStatus, setPushStatus] = useState<Awaited<ReturnType<typeof api.pushStatus>> | null>(null);
+  useEffect(() => {
+    if (open) api.pushStatus().then(setPushStatus).catch(() => { /* the line is left out */ });
+  }, [open, push.state, push.info]);
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -185,6 +189,14 @@ export function NotificationBell({ align = 'end' }: { align?: 'start' | 'end' })
             {push.state === 'denied' && <p className="text-muted">{t('notif.blocked')}</p>}
             {push.state === 'needs_install' && <p className="text-muted">{t('notif.installFirst')}</p>}
             {push.state === 'unsupported' && <p className="text-muted">{t('notif.unsupported')}</p>}
+            {pushStatus?.last && (
+              <p className={pushStatus.last.devices > 0 && pushStatus.last.sent === 0 ? 'text-alert-deep [overflow-wrap:anywhere]' : 'text-muted'}>
+                {t('notif.lastPush')} <span className="num">{fmtDateTime(pushStatus.last.at)}</span>{' — '}
+                {pushStatus.last.devices === 0 ? t('notif.lastNoDevices')
+                  : pushStatus.last.sent > 0 ? t('notif.lastSent', { n: pushStatus.last.sent })
+                    : t('notif.lastFailed', { error: pushStatus.last.error ?? '' })}
+              </p>
+            )}
             {push.info && <p className="text-accent-deep">{push.info}</p>}
             {push.error && <p className="text-alert-deep [overflow-wrap:anywhere]">{push.error}</p>}
           </div>

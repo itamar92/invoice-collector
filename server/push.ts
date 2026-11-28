@@ -117,7 +117,9 @@ export async function sendPush(msg: PushMessage, fetchImpl: typeof fetch = fetch
       const res = await fetchImpl(r.endpoint, {
         method: 'POST',
         headers: {
-          Authorization: vapidAuthorization(r.endpoint), TTL: '86400', Urgency: 'normal',
+          // 'high': Apple sends anything lower at its low (power-saving) priority, which a locked iPhone may hold back
+          // for a long time, so a new document's notification arrived only once the app was opened.
+          Authorization: vapidAuthorization(r.endpoint), TTL: '86400', Urgency: 'high',
           'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream',
           ...(msg.tag ? { Topic: msg.tag.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32) } : {}),
         },

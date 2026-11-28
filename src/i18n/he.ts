@@ -891,6 +891,10 @@ export const he = {
   'notif.installFirst': 'באייפון: הוסיפו את האפליקציה למסך הבית (שיתוף ← הוספה למסך הבית), פתחו אותה משם והפעילו כאן התראות.',
   'notif.unsupported': 'הדפדפן הזה לא תומך בהתראות.',
   'notif.pushFailed': 'שליחת ההתראה נכשלה',
+  'notif.lastPush': 'התראה אחרונה לטלפון:',
+  'notif.lastSent': 'נמסרה לשירות ההתראות ({n} מכשירים)',
+  'notif.lastNoDevices': 'לא נשלחה, כי אף מכשיר לא רשום להתראות',
+  'notif.lastFailed': 'נכשלה: {error}',
 
   // automatic flow
   'inbox.label': 'לקלוט קבצים שמניחים בתיקיית הבסיס',

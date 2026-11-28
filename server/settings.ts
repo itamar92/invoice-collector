@@ -61,6 +61,8 @@ export type Settings = {
    * is deleted once filed under the folder template. Dropbox only; needs the files.content.read permission.
    */
   storageInbox: boolean;
+  /** What happened to the last document notification sent to the phones (shown under the bell). */
+  lastPush: { at: string; devices: number; sent: number; error: string | null } | null;
 };
 
 /** Each setting is one row (JSON-encoded); rows absent from the table fall back to IL_DEFAULTS. */

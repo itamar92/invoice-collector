@@ -75,6 +75,7 @@ test('sendPush: encrypted POST to each device; a device the service says is gone
   assert.deepEqual(r, { sent: 1, failed: 1, devices: 2, errors: ['web.push.apple.com: 410 {"reason":"Unregistered"}'] });
   assert.equal(seen[0]!.headers['Content-Encoding'], 'aes128gcm');
   assert.match(seen[0]!.headers.Authorization!, /^vapid t=/);
+  assert.equal(seen[0]!.headers.Urgency, 'high', 'Apple holds back lower-urgency pushes on a locked iPhone');
   assert.deepEqual(JSON.parse(a.decrypt(seen[0]!.body)), { title: 'T', body: 'B', url: '/items/1' });
   assert.equal(countPushSubscriptions(), 1);
   assert.equal(getDb().prepare('SELECT endpoint FROM push_subscriptions').pluck().get(), 'https://fcm.googleapis.com/fcm/send/a');

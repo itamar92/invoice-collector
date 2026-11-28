@@ -19,7 +19,7 @@ import {
 import { AiOutputError, AiUnavailableError, type AiProvider, type AiRequest } from '../server/ai/provider.js';
 import { EXTRACT_SYSTEM, RECIPE_SYSTEM } from '../server/ai/prompts.js';
 import { IL_DEFAULTS } from '../server/defaults/il.js';
-import { updateSettings } from '../server/settings.js';
+import { getSettings, updateSettings } from '../server/settings.js';
 import { listNotifications, markNotificationsRead, unreadNotifications } from '../server/core/notifications.js';
 import { autoApproveWaitingVendors, processItem, reapplyVendorRecipe, reparseItem, setVendorDecision, vendorKeyFor } from '../server/core/pipeline.js';
 import { itemUsage, usageSummary } from '../server/ai/usage.js';
@@ -1168,6 +1168,8 @@ test('auto-approve on: a new supplier\'s ongoing invoice is filed and sent witho
   assert.equal(unreadNotifications(), 1);
   assert.equal(markNotificationsRead(), 1);
   assert.equal(unreadNotifications(), 0);
+  // No phone registered: the bell says so instead of leaving the owner to wonder why nothing arrived.
+  assert.deepEqual(getSettings().lastPush, { at: n!.at, devices: 0, sent: 0, error: null });
 });
 
 test('auto-approve on: a first-import (backfill) document still waits for the supplier decision, no notification', async () => {

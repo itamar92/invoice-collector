@@ -14,7 +14,7 @@ import {
 } from './core/items.js';
 import { listMissed, hideAllMissed, hideMissed, queueMissed } from './core/missed.js';
 import { clearNotifications, listNotifications, markNotificationsRead, unreadNotifications } from './core/notifications.js';
-import { deletePushSubscription, isAllowedEndpoint, savePushSubscription, sendPush, vapidPublicKey } from './push.js';
+import { countPushSubscriptions, deletePushSubscription, isAllowedEndpoint, savePushSubscription, sendPush, vapidPublicKey } from './push.js';
 import { withdrawShared } from './core/sharedRecipes.js';
 import { markedEmailIds, resetData } from './core/reset.js';
 import { suggestFilter } from './core/labelSuggest.js';
@@ -545,6 +545,9 @@ export function apiRouter(ctx: ApiContext): express.Router {
     const { endpoint } = parse(z.object({ endpoint: z.string().max(1000) }).strict(), req.body);
     deletePushSubscription(endpoint);
     res.json({ ok: true });
+  }));
+  r.get('/push/status', wrap((_req, res) => {
+    res.json({ devices: countPushSubscriptions(), last: getSettings().lastPush });
   }));
   r.post('/push/test', wrap(async (_req, res) => {
     res.json(await sendPush({ title: 'אוסף החשבוניות', body: 'התראות פועלות במכשיר הזה ✓', url: '/attention', tag: 'test' }));
